@@ -25,6 +25,5 @@ ENV PORT=5000 \
 
 EXPOSE 5000
 
-# Use gunicorn with app factory
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "60", "--factory", "app:create_app"]
-
+# Use gunicorn without --factory via explicit wsgi callable
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "60", "wsgi:app"]
