@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or 'EasyNote 待办' }}</title>
+    <meta name="csrf-token" content="{{ csrf_token }}" />
+    <link rel="icon" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/css/global.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="toolbar">
+        <button id="delDoneBtn" class="btn icon trash" title="清除已完成" aria-label="清除已完成"><i class="fa-solid fa-trash"></i></button>
+        <button id="syncBtn" class="btn icon" title="同步" aria-label="同步"><i class="fa-solid fa-rotate"></i></button>
+        <button id="themeBtn" class="btn icon" title="切换明暗" aria-label="切换明暗"><i class="fa-solid fa-circle-half-stroke"></i></button>
+        <div class="spacer"></div>
+        <button id="settingsBtn" class="btn icon" title="设置" aria-label="设置"><i class="fa-solid fa-gear"></i></button>
+        <button id="logoutBtn" class="btn icon" title="退出登录" aria-label="退出登录"><i class="fa-solid fa-right-from-bracket"></i></button>
+      </div>
+      <div class="toolbar">
+        <input id="newTodo" class="input" type="text" placeholder="输入待办，回车添加" />
+        <button id="addBtn" class="btn primary icon" title="添加" aria-label="添加"><i class="fa-solid fa-plus"></i></button>
+      </div>
+
+      <div id="list" class="list" aria-label="待办列表"></div>
+
+      <div class="footer">
+        <span class="note" id="status"></span>
+      </div>
+    </div>
+
+    <script>
+      // --- Theme (auto + manual) ---
+      (function initTheme(){
+        const saved = localStorage.getItem('theme');
+        if(saved==='dark' || saved==='light') document.documentElement.setAttribute('data-theme', saved);
+      })();
+      document.getElementById('themeBtn').onclick = () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+      };
+
+      const $ = (sel)=>document.querySelector(sel);
+      const listEl = $('#list');
+      const statusEl = $('#status');
+      let csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+      let todos = []; // local-first state
+
+      function loadLocal(){
+        try{ todos = JSON.parse(localStorage.getItem('todos')||'[]'); }
+        catch{ todos = [] }
+      }
+      function saveLocal(){ localStorage.setItem('todos', JSON.stringify(todos)); }
+
+      function render(){
+        listEl.innerHTML = '';
+        todos.sort((a,b)=>a.position-b.position);
+        for(const t of todos){
+          const row = document.createElement('div');
+          row.className='item';
+          row.draggable=true;
+          row.dataset.id = t.id;
+          row.innerHTML = `
+            <input type="checkbox" class="checkbox" ${t.completed? 'checked':''} />
+            <div class="text ${t.completed? 'completed':''}">${escapeHtml(t.text)}</div>
+            <div class="handle" title="拖动排序">≡</div>
+          `;
+          const cb = row.querySelector('.checkbox');
+          cb.addEventListener('change', ()=>{
+            t.completed = cb.checked;
+            row.querySelector('.text').classList.toggle('completed', t.completed);
+            saveLocal();
+            syncUpdate(t).catch(()=>{});
+          });
+          addDnDHandlers(row);
+          listEl.appendChild(row);
+        }
+      }
+
+      function escapeHtml(s){
+        return s.replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;' }[c]));
+      }
+
+      function addDnDHandlers(el){
+        el.addEventListener('dragstart', (e)=>{
+          el.classList.add('dragging');
+          e.dataTransfer.effectAllowed='move';
+        });
+        el.addEventListener('dragend', ()=>{
+          el.classList.remove('dragging');
+          updatePositionsFromDOM();
+        });
+        el.addEventListener('dragover', (e)=>{
+          e.preventDefault();
+          const dragging = $('.item.dragging');
+          if(!dragging) return;
+          const rect = el.getBoundingClientRect();
+          const after = (e.clientY - rect.top) > rect.height/2;
+          if(after) el.after(dragging); else el.before(dragging);
+        });
+        // Mobile long-press helper
+        let pressT;
+        el.addEventListener('touchstart', ()=>{ pressT = setTimeout(()=>{ el.draggable=true; el.classList.add('dragging') }, 300) });
+        el.addEventListener('touchend', ()=>{ clearTimeout(pressT); el.classList.remove('dragging') });
+      }
+
+      function updatePositionsFromDOM(){
+        const ids = Array.from(document.querySelectorAll('.item')).map(n=>Number(n.dataset.id));
+        ids.forEach((id, idx)=>{
+          const t = todos.find(x=>x.id===id);
+          if(t) t.position = idx;
+        });
+        saveLocal();
+        syncReorder(ids).catch(()=>{});
+      }
+
+      async function api(path, opts={}){
+        const init = {
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          ...opts
+        };
+        if(['POST','PUT','DELETE'].includes((init.method||'GET').toUpperCase())){
+          init.headers['X-CSRF-Token'] = csrf || '';
+        }
+        const r = await fetch(path, init);
+        if(!r.ok){ throw new Error((await r.json().catch(()=>({}))).error||('HTTP '+r.status)) }
+        return r.json();
+      }
+
+      async function syncFromServer(){
+        try{
+          const j = await api('/api/todos');
+          const remote = j.todos||[];
+          todos = remote;
+          saveLocal();
+          render();
+        }catch(e){ /* unauthorized? redirect */ }
+      }
+      async function syncCreate(text){
+        try{
+          const j = await api('/api/todos', { method:'POST', body: JSON.stringify({ text }) });
+          const idx = todos.findIndex(x=>!x.id && x.text===text);
+          if(idx>=0) todos[idx] = j.todo; else todos.push(j.todo);
+          saveLocal(); render();
+        }catch(e){ /* ignore */ }
+      }
+      async function syncUpdate(t){
+        if(!t.id) return;
+        try{
+          await api(`/api/todos/${t.id}`, { method:'PUT', body: JSON.stringify({ completed: !!t.completed, text: t.text, position: t.position }) });
+        }catch(e){ /* ignore */ }
+      }
+      async function syncReorder(ids){
+        try{ await api('/api/todos/reorder', { method:'POST', body: JSON.stringify({ order: ids }) }); }
+        catch(e){ /* ignore */ }
+      }
+      async function bulkUpsert(){
+        try{ await api('/api/todos/bulk_upsert', { method:'POST', body: JSON.stringify({ todos }) }); }
+        catch(e){ /* ignore */ }
+      }
+
+      function addTodoFromInput(){
+        const el = document.getElementById('newTodo');
+        const text = el.value.trim();
+        if(!text) return;
+        const temp = { id: null, text, completed:false, position: todos.length, updated_at: new Date().toISOString() };
+        todos.push(temp);
+        el.value='';
+        saveLocal(); render();
+        syncCreate(text);
+      }
+
+      document.getElementById('addBtn').onclick = addTodoFromInput;
+      document.getElementById('newTodo').addEventListener('keydown', (e)=>{ if(e.key==='Enter') addTodoFromInput(); });
+      document.getElementById('delDoneBtn').onclick = async ()=>{
+        todos = todos.filter(t=>!t.completed);
+        todos.forEach((t,i)=>t.position=i);
+        saveLocal(); render();
+        try{ await api('/api/todos/completed', { method:'DELETE' }); }catch{}
+      };
+      document.getElementById('syncBtn').onclick = async ()=>{
+        statusEl.textContent = '同步中…';
+        await bulkUpsert();
+        statusEl.textContent = '已同步';
+        setTimeout(()=> statusEl.textContent='', 1200);
+      };
+      document.getElementById('settingsBtn').onclick = ()=>{ location.href = '/settings' };
+      document.getElementById('logoutBtn').onclick = async ()=>{
+        await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
+        location.href = '/login';
+      };
+
+      (async function init(){
+        loadLocal();
+        render();
+        await syncFromServer();
+      })();
+    </script>
+  </body>
+  </html>

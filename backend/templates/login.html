@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or '登录 / 注册 - EasyNote' }}</title>
+    <link rel="icon" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/css/global.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  </head>
+  <body>
+    <div class="auth-card">
+      <h2 class="auth-title">登录 / 注册</h2>
+      <p class="note">使用邮箱与至少 8 位密码</p>
+      <div>
+        <label class="note">邮箱</label>
+        <input id="email" class="auth-input" type="email" placeholder="you@example.com" />
+      </div>
+      <div style="margin-top:8px">
+        <label class="note">密码</label>
+        <input id="password" class="auth-input" type="password" placeholder="至少8位" />
+      </div>
+      <div class="auth-actions">
+        <button id="login" class="btn primary">登录</button>
+        <button id="register" class="btn">注册</button>
+      </div>
+      <p class="note" id="msg"></p>
+    </div>
+
+    <script>
+      const msg = document.getElementById('msg');
+      async function post(path, body){
+        msg.textContent='';
+        const r = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          credentials: 'include',
+        });
+        if(!r.ok){
+          const j = await r.json().catch(()=>({}));
+          const code = j.error || ('HTTP '+r.status);
+          const text = mapError(code, path.includes('login'));
+          throw new Error(text);
+        }
+        return r.json();
+      }
+      function mapError(code, isLogin){
+        const dict = {
+          invalid_credentials: '邮箱或密码错误',
+          invalid_email: '邮箱格式不正确',
+          weak_password: '密码至少 8 位',
+          email_taken: '该邮箱已被注册',
+          unauthorized: '未登录',
+        };
+        if(dict[code]) return dict[code];
+        if(isLogin) return '登录失败，请稍后重试';
+        return '注册失败，请稍后重试';
+      }
+      document.getElementById('login').onclick = async () =>{
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        try{
+          await post('/api/auth/login', { email, password });
+          location.href = '/';
+        }catch(e){ msg.textContent = '登录失败：'+e.message }
+      }
+      document.getElementById('register').onclick = async () =>{
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        try{
+          await post('/api/auth/register', { email, password });
+          location.href = '/';
+        }catch(e){ msg.textContent = '注册失败：'+e.message }
+      }
+    </script>
+  </body>
+  </html>

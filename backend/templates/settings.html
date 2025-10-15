@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or '设置 - EasyNote' }}</title>
+    <meta name="csrf-token" content="{{ csrf_token }}" />
+    <link rel="icon" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/css/global.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="toolbar">
+        <button id="backBtn" class="btn icon" title="返回" aria-label="返回"><i class="fa-solid fa-arrow-left"></i></button>
+        <div class="spacer"></div>
+        <button id="logoutBtn" class="btn icon" title="退出登录" aria-label="退出登录"><i class="fa-solid fa-right-from-bracket"></i></button>
+      </div>
+
+      <h3 class="auth-title" style="margin-top:12px">账户设置</h3>
+      <div class="note">当前邮箱：<strong id="email">{{ email }}</strong></div>
+
+      <div style="margin-top:16px;border:1px solid var(--border);border-radius:12px;padding:16px">
+        <h4 class="auth-title" style="margin:0 0 8px 0">修改密码</h4>
+        <input id="current" class="auth-input" type="password" placeholder="当前密码" style="margin-top:8px" />
+        <input id="new" class="auth-input" type="password" placeholder="新密码（至少8位）" style="margin-top:8px" />
+        <input id="confirm" class="auth-input" type="password" placeholder="再次输入新密码" style="margin-top:8px" />
+        <div class="auth-actions">
+          <button id="changePwdBtn" class="btn primary">保存新密码</button>
+        </div>
+        <div class="note" id="pwdMsg"></div>
+      </div>
+
+      <div style="margin-top:16px;border:1px solid var(--border);border-radius:12px;padding:16px">
+        <h4 class="auth-title" style="margin:0 0 8px 0">删除账号</h4>
+        <p class="note">此操作不可恢复，将删除账号以及所有相关数据。</p>
+        <button id="deleteAccountOpen" class="btn danger">删除账号</button>
+      </div>
+    </div>
+
+    <!-- Delete modal -->
+    <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+      <div class="modal">
+        <h4 class="modal-title">确认删除账号</h4>
+        <p class="note">请输入你的邮箱以确认：<strong>{{ email }}</strong></p>
+        <input id="confirmEmail" type="email" placeholder="输入邮箱确认" />
+        <div class="modal-actions">
+          <button id="cancelDelete" class="btn">取消</button>
+          <button id="confirmDelete" class="btn danger">确认删除</button>
+        </div>
+        <div class="note" id="delMsg"></div>
+      </div>
+    </div>
+
+    <script>
+      const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+      const email = document.getElementById('email').textContent.trim();
+      const modal = document.getElementById('confirmModal');
+      const pwdMsg = document.getElementById('pwdMsg');
+      const delMsg = document.getElementById('delMsg');
+
+      document.getElementById('backBtn').onclick = ()=>{ location.href='/' };
+      document.getElementById('logoutBtn').onclick = async ()=>{
+        await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
+        location.href='/login';
+      };
+
+      document.getElementById('changePwdBtn').onclick = async ()=>{
+        pwdMsg.textContent = '';
+        const current = document.getElementById('current').value;
+        const nu = document.getElementById('new').value;
+        const cf = document.getElementById('confirm').value;
+        if(nu !== cf){ pwdMsg.textContent = '两次输入的新密码不一致'; return }
+        try{
+          const r = await fetch('/api/auth/change_password', {
+            method:'POST', credentials:'include',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ current, new: nu })
+          });
+          if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.error||('HTTP '+r.status)) }
+          pwdMsg.textContent = '密码已更新';
+          document.getElementById('current').value = '';
+          document.getElementById('new').value = '';
+          document.getElementById('confirm').value = '';
+        }catch(e){ pwdMsg.textContent = '更新失败：'+e.message }
+      };
+
+      document.getElementById('deleteAccountOpen').onclick = ()=>{
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden','false');
+        document.getElementById('confirmEmail').focus();
+      };
+      document.getElementById('cancelDelete').onclick = ()=>{
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden','true');
+        delMsg.textContent = '';
+        document.getElementById('confirmEmail').value = '';
+      };
+      document.getElementById('confirmDelete').onclick = async ()=>{
+        delMsg.textContent = '';
+        const typed = document.getElementById('confirmEmail').value.trim();
+        if(typed !== email){ delMsg.textContent = '邮箱不匹配'; return }
+        try{
+          await fetch('/api/auth/delete_account', { method:'DELETE', credentials:'include', headers: { 'X-CSRF-Token': csrf } });
+          localStorage.removeItem('todos');
+          location.href = '/login';
+        }catch(e){ delMsg.textContent = '删除失败'; }
+      };
+    </script>
+  </body>
+  </html>
