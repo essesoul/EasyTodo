@@ -1,7 +1,12 @@
+import os
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent / "app.db"
+# Database directory inside the app (can be overridden by env)
+DEFAULT_DB_DIR = Path(__file__).resolve().parent / "database"
+DB_DIR = Path(os.environ.get("DB_DIR", DEFAULT_DB_DIR))
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = Path(os.environ.get("DB_PATH", DB_DIR / "app.db"))
 
 
 def get_conn():
