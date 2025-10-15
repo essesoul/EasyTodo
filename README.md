@@ -6,7 +6,7 @@
 
 - 顶部胶囊输入框添加待办
 - 列表可拖动排序（移动端长按后拖动）
-- 勾选完成有灰色+删除线效果
+- 勾选完成有灰色 + 删除线效果
 - 一键清除已完成任务
 - 本地优先：本地存储，改动自动同步至服务器；可手动保存
 - GitHub 风格的简洁样式
@@ -61,8 +61,3 @@ python app.py
 - JSON 写操作要求 `X-CSRF-Token`，模板中以 meta 注入并随会话生成；也可从 `/api/csrf` 获取。
 - 密码使用 Werkzeug `generate_password_hash` 存储，登录校验使用 `check_password_hash`。
 - 删除账号会级联删除该用户全部待办数据。
-
-## 备注
-
-- 本仓库未包含 node_modules；请在 `frontend/` 中 `npm install`。
-- 如需扩展：支持多端冲突合并、离线批量同步、PWA、通知等。
