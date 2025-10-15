@@ -1,4 +1,4 @@
-# EasyNote 简单易用的个人待办列表
+# EasyTodo 简单易用的个人待办列表
 
 一个基于 Flask + SQLite 的轻量待办应用，开箱即用，支持暗黑模式、拖拽排序与账号数据清除。
 
@@ -7,7 +7,7 @@
 - 拉取镜像：
   
   ```bash
-  docker pull ghcr.io/essesoul/easynote:latest
+  docker pull ghcr.io/essesoul/easytodo:latest
   ```
 
 - 准备本地数据库目录（用于持久化）：
@@ -19,34 +19,32 @@
 - 运行容器（映射端口、设置密钥并挂载数据库目录）：
   
   ```bash
-  docker run --name easynote --rm \
+  docker run --name easytodo --rm \
     -p 5000:5000 \
     -e SECRET_KEY=$(openssl rand -hex 32) \
     -v $(pwd)/database:/app/database \
-    ghcr.io/essesoul/easynote:latest
+    ghcr.io/essesoul/easytodo:latest
   ```
 
 - 打开浏览器访问：`http://localhost:5000`
 
-## 本地构建与运行（如果拉取的镜像过旧）
-
-若遇到 `gunicorn: error: unrecognized arguments: --factory` 等错误，说明你运行的镜像较旧。可本地构建当前仓库镜像并运行（并将数据库以目录方式挂载）：
+## 本地构建与运行
 
 - 构建（不使用缓存）：
 
   ```bash
-  docker build --no-cache -t easynote:local .
+  docker build --no-cache -t easytodo:local .
   ```
 
 - 运行：
 
   ```bash
   mkdir -p ./database
-  docker run --name easynote --rm \
+  docker run --name easytodo --rm \
     -p 5000:5000 \
     -e SECRET_KEY=$(openssl rand -hex 32) \
     -v $(pwd)/database:/app/database \
-    easynote:local
+    easytodo:local
   ```
 
 ## 环境变量

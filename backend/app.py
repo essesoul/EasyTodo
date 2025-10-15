@@ -72,13 +72,13 @@ def create_app():
     def login_page():
         if current_user_id():
             return redirect(url_for('home'))
-        return render_template('login.html', title='登录 / 注册 - EasyNote')
+        return render_template('login.html', title='登录 / 注册 - EasyTodo')
 
     @app.get('/')
     @login_required
     def home():
         token = ensure_csrf_token()
-        return render_template('index.html', title='EasyNote 待办', csrf_token=token)
+        return render_template('index.html', title='EasyTodo 待办', csrf_token=token)
 
     @app.get('/settings')
     @login_required
@@ -91,7 +91,7 @@ def create_app():
         row = cur.fetchone()
         conn.close()
         email = row['email'] if row else ''
-        return render_template('settings.html', title='设置 - EasyNote', csrf_token=token, email=email)
+        return render_template('settings.html', title='设置 - EasyTodo', csrf_token=token, email=email)
 
     # --- Auth ---
     @app.post('/api/auth/register')
