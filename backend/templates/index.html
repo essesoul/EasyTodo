@@ -186,8 +186,8 @@
       };
       document.getElementById('syncBtn').onclick = async ()=>{
         statusEl.textContent = '同步中…';
-        await bulkUpsert();
-        statusEl.textContent = '已同步';
+        await syncFromServer();
+        statusEl.textContent = '已从服务器获取最新数据';
         setTimeout(()=> statusEl.textContent='', 1200);
       };
       document.getElementById('settingsBtn').onclick = ()=>{ location.href = '/settings' };
