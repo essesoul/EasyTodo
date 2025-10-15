@@ -44,6 +44,38 @@ python app.py
 - `SECRET_KEY`（生产环境必配，使用足够随机的值）
 - `SESSION_COOKIE_SECURE=true`（在 HTTPS 下）
 
+## Docker 与自动发布
+
+本仓库已包含用于多平台镜像构建与发布的 GitHub Actions 工作流：
+
+- 工作流文件：`.github/workflows/docker.yml`
+- 目标仓库：GitHub Container Registry（GHCR）`ghcr.io/<owner>/<repo>`
+- 触发：推送到 `main/master`、推送符合 `v*.*.*` 的 tag、PR（仅构建不推送）
+- 平台：`linux/amd64`、`linux/arm64`
+
+使用步骤：
+- 确保仓库可使用默认的 `GITHUB_TOKEN`（已在工作流中设置 `packages: write` 权限）。
+- 合并到 `main` 后会自动推送 `latest` 与分支/版本对应的 tag。
+
+本地构建与运行：
+
+```
+docker build -t easynote:local .
+docker run --rm -p 5000:5000 -e SECRET_KEY=$(openssl rand -hex 32) easynote:local
+```
+
+使用已发布镜像（示例）：
+
+```
+docker run --rm -p 5000:5000 \
+  -e SECRET_KEY=$(openssl rand -hex 32) \
+  ghcr.io/<owner>/<repo>:latest
+```
+
+如果希望推送到 Docker Hub：
+- 在仓库设置中添加 `DOCKERHUB_USERNAME` 与 `DOCKERHUB_TOKEN`（访问令牌）。
+- 参见工作流内注释，替换登录步骤及镜像名称为 `your-namespace/easynote`。
+
 ## API 概览（简）
 
 - `GET /api/csrf` 获取 CSRF token（会话内）

@@ -1,0 +1,17 @@
+.git
+.github
+.idea
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+build/
+dist/
+*.log
+
+# Local DB file should not be baked into the image
+backend/app.db
