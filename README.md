@@ -15,9 +15,12 @@
 
 ## 目录结构
 
+```
 backend/     # Flask + SQLite API
 backend/static/      # 前端静态资源（CSS、图标）
 backend/templates/   # Jinja2 页面模板
+```
+
 
 ## 本地运行
 
