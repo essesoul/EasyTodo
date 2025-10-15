@@ -1,6 +1,6 @@
-# EasyNote
+# EasyNote 简单易用的个人待办列表
 
-一个使用 Flask + SQLite（同源 Jinja2 模板前端）的简单待办应用。
+一个使用 Flask + SQLite 的简单待办应用。
 
 ## 功能
 
