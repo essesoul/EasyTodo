@@ -87,7 +87,10 @@ body{
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-contrast)}
 .btn.primary:hover{filter:brightness(1.08)}
 .btn.primary:active{filter:brightness(0.96)}
-.btn.danger{background:var(--panel);border-color:#c8c8c8;color:var(--fg)}
+.btn.danger{ color:#b74646; border-color:#e6bcbc; background:var(--panel); }
+.btn.danger:hover{ background:#f6eaea }
+[data-theme="dark"] .btn.danger{ color:#e79a9a; border-color:#5a3a3a }
+[data-theme="dark"] .btn.danger:hover{ background:#2a1717 }
 .toolbar{display:flex;gap:6px;align-items:center}
 .spacer{flex:1}
 .toolbar + .toolbar{margin-top:8px}
@@ -134,6 +137,11 @@ body{
 .modal-actions{margin-top:12px;display:flex;gap:8px;justify-content:flex-end}
 .modal input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg)}
 
+/* Emphasize danger for account deletion modal */
+#confirmModal .modal{ border-color: var(--danger); }
+#confirmModal .modal-title{ color: var(--danger); }
+#confirmModal input{ border-color: var(--danger); }
+
 /* Site footer */
 .site-footer{
   margin:24px auto 16px;
@@ -143,3 +151,27 @@ body{
 }
 .site-footer a{ color:inherit; text-decoration:none }
 .site-footer a:hover{ text-decoration:underline }
+
+/* Simple divider between settings sections */
+.section-divider{ border-top:1px solid var(--border); margin:12px 0; }
+
+/* Table header sort links (no rounded buttons) */
+.th-sort{ cursor:pointer; color:var(--fg); font-weight:600; }
+.th-sort:hover{ text-decoration:underline; }
+
+/* Toggle switch */
+.switch{ position:relative; display:inline-block; width:44px; height:24px; }
+.switch input{ opacity:0; width:0; height:0; }
+.switch .slider{ position:absolute; inset:0; background:var(--border); border-radius:999px; transition:background .2s ease; }
+.switch .slider::before{ content:""; position:absolute; height:18px; width:18px; left:3px; top:3px; background:var(--panel); border-radius:50%; transition:transform .2s ease; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+.switch input:checked + .slider{ background:var(--accent); }
+.switch input:checked + .slider::before{ transform:translateX(20px); }
+
+/* SMTP grid: two columns on wide screens */
+.smtp-grid{ display:grid; grid-template-columns: 1fr; gap:8px; }
+@media (min-width: 560px){
+  .smtp-grid{ grid-template-columns: 1fr 1fr; }
+}
+
+/* Align TLS label text padding with inputs */
+.tls-label{ padding: 0 12px; }

@@ -31,12 +31,64 @@
         <label class="note">密码</label>
         <input id="password" class="auth-input" type="password" placeholder="至少8位" />
       </div>
-      <div class="auth-actions">
+      <div class="auth-actions" style="align-items:center">
         <button id="login" class="btn primary">登录</button>
+        {% if registration_open %}
         <button id="register" class="btn">注册</button>
+        {% else %}
+        <span class="reg-disabled-wrap" style="position:relative; display:inline-block">
+          <button id="register" class="btn" disabled title="已关闭注册">注册</button>
+          <!-- Overlay to capture clicks and show message when registration is closed -->
+          <button id="registerOverlay" class="btn" aria-disabled="true" title="站点已关闭注册"
+                  style="position:absolute; inset:0; background:transparent; border:none; padding:0; margin:0; opacity:0; cursor:not-allowed"></button>
+        </span>
+        {% endif %}
+        <div class="spacer"></div>
+        {% if smtp_enabled %}
+        <a id="forgotLink" href="#" class="note" style="display:inline-flex;align-items:center;height:var(--control-h);text-decoration:none">忘记密码？</a>
+        {% endif %}
       </div>
       <p class="note" id="msg"></p>
     </div>
+
+    {% if smtp_enabled %}
+    <!-- Forgot Password Modal -->
+    <div id="fpModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+      <div class="modal">
+        <div class="toolbar" style="margin-bottom:8px">
+          <h4 class="modal-title" id="fpTitle" style="margin:0">找回密码</h4>
+          <div class="spacer"></div>
+          <button id="fpCloseBtn" class="btn icon" title="关闭" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div id="fpStep1">
+          <p class="note">输入注册邮箱，系统将为你重置密码并发送到邮箱。</p>
+          <input id="fpEmail" type="email" placeholder="you@example.com" />
+          <div class="modal-actions">
+            <button id="fpCancel1" class="btn">取消</button>
+            <button id="fpNext" class="btn primary">下一步</button>
+          </div>
+        </div>
+        <div id="fpStep2" style="display:none">
+          <p class="note">请解答以确认重置：</p>
+          <div id="fpChallenge" class="note" style="font-weight:bold; margin-bottom:8px"></div>
+          <input id="fpAnswer" type="text" placeholder="结果" />
+          {% if turnstile_enabled and turnstile_site_key %}
+          <div style="margin:8px 0">
+            <div id="tsWidget" class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" data-callback="onTsSuccess"></div>
+          </div>
+          {% endif %}
+          <div class="modal-actions">
+            <button id="fpBack" class="btn">返回</button>
+            <button id="fpConfirm" class="btn danger" disabled>确认重置</button>
+          </div>
+        </div>
+        <div id="fpStep3" style="display:none">
+          <p class="note">新密码已发送至你的邮箱，请注意查收（收件箱/垃圾箱）。</p>
+        </div>
+        <div id="fpMsg" class="note"></div>
+      </div>
+    </div>
+    {% endif %}
 
     <script>
       const msg = document.getElementById('msg');
@@ -63,6 +115,7 @@
           weak_password: '密码至少 8 位',
           email_taken: '该邮箱已被注册',
           unauthorized: '未登录',
+          registration_closed: '站点已关闭注册',
         };
         if(dict[code]) return dict[code];
         if(isLogin) return '登录失败，请稍后重试';
@@ -76,15 +129,141 @@
           location.href = '/';
         }catch(e){ msg.textContent = '登录失败：'+e.message }
       }
-      document.getElementById('register').onclick = async () =>{
-        const email = document.getElementById('email').value.trim();
-        const password = document.getElementById('password').value;
-        try{
-          await post('/api/auth/register', { email, password });
-          location.href = '/';
-        }catch(e){ msg.textContent = '注册失败：'+e.message }
+      const regBtn = document.getElementById('register');
+      if(regBtn && !regBtn.disabled){
+        regBtn.onclick = async () =>{
+          const email = document.getElementById('email').value.trim();
+          const password = document.getElementById('password').value;
+          try{
+            await post('/api/auth/register', { email, password });
+            location.href = '/';
+          }catch(e){ msg.textContent = '注册失败：'+e.message }
+        };
       }
+      // When registration is closed, show a clear message on click
+      const regOverlay = document.getElementById('registerOverlay');
+      if(regOverlay){
+        regOverlay.addEventListener('click', (e)=>{
+          e.preventDefault();
+          msg.textContent = '站点已关闭注册';
+        });
+      }
+      const fl = document.getElementById('forgotLink');
+      const fpModal = document.getElementById('fpModal');
+      const fpEmail = document.getElementById('fpEmail');
+      const fpNext = document.getElementById('fpNext');
+      const fpCancel1 = document.getElementById('fpCancel1');
+      const fpBack = document.getElementById('fpBack');
+      const fpConfirm = document.getElementById('fpConfirm');
+      const fpStep1 = document.getElementById('fpStep1');
+      const fpStep2 = document.getElementById('fpStep2');
+      const fpStep3 = document.getElementById('fpStep3');
+      const fpCloseBtn = document.getElementById('fpCloseBtn');
+      const fpMsg = document.getElementById('fpMsg');
+      const fpChallenge = document.getElementById('fpChallenge');
+      let tsToken = '';
+      window.onTsSuccess = function(token){ tsToken = token; updateConfirmState(); };
+      function showStep(step){
+        if(fpStep1) fpStep1.style.display = (step===1?'':'none');
+        if(fpStep2) fpStep2.style.display = (step===2?'':'none');
+        if(fpStep3) fpStep3.style.display = (step===3?'':'none');
+      }
+      function openFp(){
+        if(fpModal){
+          // prefill from login email
+          const e = document.getElementById('email');
+          if(e && fpEmail) fpEmail.value = e.value.trim();
+          fpMsg.textContent = '';
+          showStep(1);
+          fpConfirm.disabled = true;
+          fpModal.style.display = 'flex';
+          fpModal.setAttribute('aria-hidden','false');
+          setTimeout(()=>fpEmail && fpEmail.focus(), 0);
+        }
+      }
+      function closeFp(){
+        if(fpModal){
+          fpModal.style.display = 'none';
+          fpModal.setAttribute('aria-hidden','true');
+        }
+        fpMsg.textContent = '';
+        tsToken = '';
+      }
+      function updateConfirmState(){
+        const needsTs = !!({{ 'true' if (turnstile_enabled and turnstile_site_key) else 'false' }});
+        if(!fpConfirm) return;
+        if(needsTs){
+          fpConfirm.disabled = !tsToken;
+        }else{
+          fpConfirm.disabled = false;
+        }
+      }
+      if(fl){ fl.addEventListener('click', (e)=>{ e.preventDefault(); openFp(); }); }
+      if(fpCancel1){ fpCancel1.addEventListener('click', closeFp); }
+      if(fpBack){ fpBack.addEventListener('click', ()=>{ fpStep1.style.display=''; fpStep2.style.display='none'; fpMsg.textContent=''; updateConfirmState(); }); }
+      if(fpNext){
+        fpNext.addEventListener('click', async ()=>{
+          fpMsg.textContent = '';
+          const emailVal = (fpEmail.value||'').trim().toLowerCase();
+          if(!emailVal || !emailVal.includes('@')){ fpMsg.textContent='请输入有效邮箱'; return }
+          fpNext.disabled = true;
+          try{
+            const r = await fetch('/api/auth/forgot/start', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ email: emailVal }) });
+            const j = await r.json().catch(()=>({}));
+            if(!r.ok){
+              const map = { invalid_email: '邮箱格式不正确', not_found: '该邮箱未注册' };
+              throw new Error(map[j.error] || (j.error || ('HTTP '+r.status)));
+            }
+            fpChallenge.textContent = j.challenge || '';
+            showStep(2);
+            fpMsg.textContent = '';
+            tsToken = '';
+            updateConfirmState();
+            // Ensure Turnstile widget refreshes to issue a fresh token
+            try{ if(window.turnstile){ window.turnstile.reset(); } }catch(_){ }
+          }catch(e){ fpMsg.textContent = '请求失败：' + (e && e.message? e.message : '未知错误'); }
+          finally{ fpNext.disabled = false; }
+        });
+      }
+      if(fpConfirm){
+        fpConfirm.addEventListener('click', async ()=>{
+          try{
+            fpMsg.textContent = '';
+            const emailVal = (fpEmail && fpEmail.value||'').trim().toLowerCase();
+            const ansEl = document.getElementById('fpAnswer');
+            const answer = ((ansEl && ansEl.value) || '').trim();
+            const needsTs = !!({{ 'true' if (turnstile_enabled and turnstile_site_key) else 'false' }});
+            if(needsTs && !tsToken){ fpMsg.textContent = '请先完成验证码'; return }
+            if(!answer){ fpMsg.textContent = '请输入答案'; return }
+            fpConfirm.disabled = true;
+            const r = await fetch('/api/auth/forgot/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ email: emailVal, answer, turnstile_token: tsToken||'' }) });
+            const j = await r.json().catch(()=>({}));
+            if(!r.ok){
+              const map = { bad_challenge: '验证失败，请返回重试', turnstile_failed:'验证码验证失败', smtp_invalid:'管理员未正确配置邮箱服务', smtp_auth_failed:'邮件服务器认证失败', smtp_send_failed:'发送邮件失败', not_found:'邮箱未注册' };
+              let base = map[j.error] || (j.error || ('HTTP '+r.status));
+              if(j.error === 'turnstile_failed' && j.detail){ base += `（${j.detail}）`; }
+              throw new Error(base);
+            }
+            // Success: show success page in modal; do not auto close
+            if(fpTitle) fpTitle.textContent = '重置成功';
+            showStep(3);
+            fpMsg.textContent = '';
+          }catch(e){
+            fpMsg.textContent = '重置失败：' + (e && e.message? e.message : '未知错误');
+            // Reset token on failure to encourage a fresh solve
+            tsToken = '';
+            try{ if(window.turnstile){ window.turnstile.reset(); } }catch(_){ }
+            updateConfirmState();
+          }finally{
+            fpConfirm.disabled = false;
+          }
+        });
+      }
+      if(fpCloseBtn){ fpCloseBtn.addEventListener('click', closeFp); }
   </script>
+    {% if turnstile_enabled and turnstile_site_key %}
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    {% endif %}
     <script src="/static/js/theme.js"></script>
     <footer class="site-footer">
       Copyright @<a href="https://github.com/essesoul/EasyTodo" target="_blank" rel="noopener noreferrer">essesoul</a>

@@ -34,18 +34,205 @@
         <input id="new" class="auth-input" type="password" placeholder="新密码（至少8位）" style="margin-top:8px" />
         <input id="confirm" class="auth-input" type="password" placeholder="再次输入新密码" style="margin-top:8px" />
         <div class="auth-actions">
-          <button id="changePwdBtn" class="btn primary">保存新密码</button>
+          <button id="changePwdBtn" class="btn primary" title="保存新密码" aria-label="保存新密码"><i class="fa-solid fa-floppy-disk"></i></button>
         </div>
         <div class="note" id="pwdMsg"></div>
       </div>
 
+      {% if not is_admin %}
       <div style="margin-top:16px;border:1px solid var(--border);border-radius:12px;padding:16px">
         <h4 class="auth-title" style="margin:0 0 8px 0">删除账号</h4>
         <p class="note">此操作不可恢复，将删除账号以及所有相关数据。</p>
         <button id="deleteAccountOpen" class="btn danger">删除账号</button>
       </div>
+      {% endif %}
+
+      {% if is_admin %}
+      <div style="margin-top:16px;border:1px solid var(--border);border-radius:12px;padding:16px">
+        <h4 class="auth-title" style="margin:0 0 8px 0">系统管理</h4>
+
+        <div class="row" style="margin-top:10px; gap:10px; align-items:center">
+          <label class="note" style="min-width:110px">开放注册</label>
+          <label class="switch">
+            <input id="registration_open" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+          <span class="note" id="regHelp">允许新用户注册</span>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div style="margin-top:4px">
+          <div class="row" style="margin:8px 0; align-items:center">
+            <h5 class="auth-title" style="margin:0; flex:1">验证码（<a href="https://www.cloudflare.com/application-services/products/turnstile/" target="_blank" rel="noopener noreferrer" style="color:inherit">Cloudflare Turnstile</a>）</h5>
+            <div class="row" style="align-items:center; gap:8px">
+              <label class="switch">
+                <input id="turnstile_enabled" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+              <label class="note">启用验证码</label>
+            </div>
+          </div>
+          <div class="smtp-grid" style="margin-top:8px">
+            <input id="turnstile_site_key" class="auth-input" placeholder="Site Key（站点密钥）" />
+            <input id="turnstile_secret_key" class="auth-input" placeholder="Secret Key（服务器密钥，留空不修改）" />
+          </div>
+          <div class="row" style="align-items:center; gap:8px; margin-top:8px">
+            <input id="turnstile_tls_skip_verify" type="checkbox" />
+            <label class="note" for="turnstile_tls_skip_verify">跳过 Turnstile 证书校验（仅在内网/无系统 CA 时临时使用）</label>
+          </div>
+          <div class="auth-actions" style="display:flex; gap:8px; align-items:center; justify-content:flex-start">
+            <button id="saveTsBtn" class="btn primary" title="保存验证码设置" aria-label="保存验证码设置"><i class="fa-solid fa-floppy-disk"></i></button>
+          </div>
+          <div class="note" id="tsMsg"></div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div style="margin-top:4px">
+          <div class="row" style="margin:8px 0; align-items:center">
+            <h5 class="auth-title" style="margin:0; flex:1">SMTP 设置</h5>
+            <div class="row" style="align-items:center; gap:8px">
+              <label class="switch">
+                <input id="smtp_enabled" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+              <label class="note">启用 SMTP</label>
+            </div>
+          </div>
+          <div class="smtp-grid" style="margin-top:8px">
+            <input id="smtp_host" class="auth-input" placeholder="SMTP 服务器主机名" />
+            <input id="smtp_port" class="auth-input" placeholder="端口(如 587/465)" />
+            <input id="smtp_username" class="auth-input" placeholder="用户名" />
+            <input id="smtp_password" class="auth-input" placeholder="密码（留空不修改）" type="password" />
+            <input id="smtp_sender" class="auth-input" placeholder="发件人" />
+            <div class="row" style="align-items:center; gap:10px">
+              <label class="note tls-label">TLS 加密</label>
+              <label class="switch">
+                <input id="smtp_use_tls" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="row" style="align-items:center; gap:10px">
+              <label class="note" title="仅用于测试/内网自签证书。生产环境不建议关闭验证。">忽略证书验证（不安全）</label>
+              <label class="switch">
+                <input id="smtp_tls_skip_verify" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="auth-actions" style="display:flex; gap:8px; align-items:center; justify-content:flex-start">
+            <button id="saveSmtpBtn" class="btn primary" title="保存设置" aria-label="保存设置"><i class="fa-solid fa-floppy-disk"></i></button>
+            <button id="testSmtpBtn" class="btn" title="测试发送" aria-label="测试发送"><i class="fa-solid fa-paper-plane"></i></button>
+          </div>
+          <div class="note" id="smtpMsg"></div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div style="margin-top:4px">
+          <style>
+            /* Scoped styles for users fullscreen */
+            .users-panel{ position:relative; transition: border-radius .38s ease, box-shadow .38s ease, transform .38s ease, opacity .4s ease; }
+            .users-panel.fullscreen{
+              position:fixed; inset:0; z-index:50;
+              background: var(--bg);
+              border-radius:0; box-shadow:none;
+              display:flex; flex-direction:column;
+            }
+            /* During fullscreen animation, keep transform transition enabled so zoom is visible */
+            .users-panel.fs-anim{ transition: transform .5s ease, opacity .5s ease, border-radius .5s ease, box-shadow .5s ease; }
+            .users-panel.fullscreen .users-header{ position:sticky; top:0; z-index:51; background:var(--panel); border-bottom:1px solid var(--border); }
+            .users-topbar{ display:grid; grid-template-columns: 1fr auto; align-items:center; padding:6px 10px; }
+            .users-title{ margin:8px 0; justify-self:start; }
+            .users-panel.fullscreen .users-topbar{ grid-template-columns: 1fr auto 1fr; }
+            .users-panel.fullscreen .users-title{ grid-column:2; justify-self:center; text-align:center; margin:6px 0; font-size:1.35rem; line-height:1.2; }
+            .users-search{ padding:0 10px 8px; transition: opacity .35s ease; }
+            /* In fullscreen, lay out: input | search | shrink at far right */
+            .users-panel.fullscreen .users-search{ display:grid; grid-template-columns: 1fr auto auto; column-gap:8px; }
+            .users-table-wrap{ margin-top:8px; overflow:auto; border:1px solid var(--border); border-radius:8px; transition: opacity .35s ease; }
+            .users-panel.fullscreen .users-table-wrap{ margin:0; flex:1; border-left:none; border-right:none; border-radius:0; }
+            .users-pager, .users-msg{ margin-top:8px; }
+            .users-pager{ display:flex; justify-content:center; }
+            /* 保持放大后分页条依然可见 */
+            .users-panel.fullscreen .users-pager{ display:flex; justify-content:center; }
+            .users-panel.fullscreen .users-msg{ display:block; }
+            .users-fullscreen-btn i{ transition: transform .4s cubic-bezier(.2,.7,.2,1), opacity .3s ease; }
+            .users-panel.fullscreen .users-fullscreen-btn i{ transform: rotate(180deg); }
+            .users-count{ margin-left:0; color: var(--muted); font-weight:500; display:inline-flex; align-items:center; gap:6px; justify-self:end; }
+            .users-panel.fullscreen .users-count{ grid-column:3; }
+            .users-count i{ font-size:.95em; opacity:.9; }
+            body.users-fullscreen{ overflow:hidden; }
+          </style>
+
+          <div id="usersPanel" class="users-panel">
+            <div class="users-header">
+              <div class="users-topbar">
+                <h5 class="auth-title users-title" id="usersTitle">用户管理</h5>
+                <span id="usersCount" class="note users-count"></span>
+              </div>
+              <div class="users-search row" style="gap:8px">
+                <input id="searchInput" class="input" placeholder="按邮箱模糊搜索" />
+                <button id="searchBtn" class="btn primary" title="搜索" aria-label="搜索"><i class="fa-solid fa-magnifying-glass"></i></button>
+                <button id="usersFullscreenBtn" class="btn icon users-fullscreen-btn" title="全屏" aria-label="全屏"><i id="usersFsIcon" class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
+              </div>
+            </div>
+            <div class="users-table-wrap">
+              <table style="width:100%; border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="text-align:left; padding:8px; border-bottom:1px solid var(--border)"><span class="th-sort" data-sort="id">ID</span></th>
+                  <th style="text-align:left; padding:8px; border-bottom:1px solid var(--border)"><span class="th-sort" data-sort="email">邮箱</span></th>
+                  <th style="text-align:left; padding:8px; border-bottom:1px solid var(--border)"><span class="th-sort" data-sort="created_at">创建时间</span></th>
+                  <th style="text-align:left; padding:8px; border-bottom:1px solid var(--border)"><span class="th-sort" data-sort="todo_count">待办数</span></th>
+                  <th style="text-align:left; padding:8px; border-bottom:1px solid var(--border)">操作</th>
+                </tr>
+              </thead>
+              <tbody id="usersTbody"></tbody>
+              </table>
+            </div>
+            <div class="users-pager row" style="gap:8px;align-items:center">
+              <button id="prevPage" class="btn" title="上一页" aria-label="上一页"><i class="fa-solid fa-angle-left"></i></button>
+              <span class="note" id="pageInfo">第 1 页</span>
+              <button id="nextPage" class="btn" title="下一页" aria-label="下一页"><i class="fa-solid fa-angle-right"></i></button>
+            </div>
+            <div class="users-msg note" id="usersMsg" style="margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Admin modals -->
+      <div id="adminModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+        <div class="modal">
+          <h4 class="modal-title" id="adminModalTitle">确认操作</h4>
+          <div id="adminModalBody" class="note" style="margin-bottom:8px"></div>
+          <input id="adminModalPwd" type="password" placeholder="输入新密码（至少8位）" style="display:none; margin-bottom:8px" />
+          <input id="adminModalInput" type="text" placeholder="输入 CONFIRM 确认" />
+          <div class="modal-actions">
+            <button id="adminCancelBtn" class="btn">取消</button>
+            <button id="adminOkBtn" class="btn danger">确认</button>
+          </div>
+          <div class="note" id="adminModalMsg"></div>
+        </div>
+      </div>
+      <!-- SMTP test modal -->
+      <div id="smtpTestModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+        <div class="modal">
+          <h4 class="modal-title">测试发送邮件</h4>
+          <p class="note">测试将使用当前表单中的 SMTP 配置（不会保存）。</p>
+          <input id="smtpTestTo" type="email" placeholder="收件邮箱" />
+          <div class="modal-actions">
+            <button id="smtpTestCancel" class="btn">取消</button>
+            <button id="smtpTestSend" class="btn primary">发送</button>
+          </div>
+          <div class="note" id="smtpTestMsg"></div>
+        </div>
+      </div>
+      {% endif %}
     </div>
 
+    {% if not is_admin %}
     <!-- Delete modal -->
     <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
       <div class="modal">
@@ -59,9 +246,13 @@
         <div class="note" id="delMsg"></div>
       </div>
     </div>
+    {% endif %}
 
     <script>
       const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+      function escapeHtml(s){
+        return (s||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+      }
       const email = document.getElementById('email').textContent.trim();
       const modal = document.getElementById('confirmModal');
       const pwdMsg = document.getElementById('pwdMsg');
@@ -93,6 +284,7 @@
         }catch(e){ pwdMsg.textContent = '更新失败：'+e.message }
       };
 
+      {% if not is_admin %}
       document.getElementById('deleteAccountOpen').onclick = ()=>{
         modal.style.display = 'flex';
         modal.setAttribute('aria-hidden','false');
@@ -114,6 +306,440 @@
           location.href = '/login';
         }catch(e){ delMsg.textContent = '删除失败'; }
       };
+      {% endif %}
+
+      {% if is_admin %}
+      // Admin logic
+      const regSwitch = document.getElementById('registration_open');
+      const regHelp = document.getElementById('regHelp');
+      const smtpMsg = document.getElementById('smtpMsg');
+      const smtpEnabledToggle = document.getElementById('smtp_enabled');
+      let smtpPasswordSet = false; // server-state: whether password already set
+      let tsSecretSet = false; // server-state: whether Turnstile secret already set
+      const amodal = document.getElementById('adminModal');
+      const amsg = document.getElementById('adminModalMsg');
+      const atitle = document.getElementById('adminModalTitle');
+      const abody = document.getElementById('adminModalBody');
+      const ainput = document.getElementById('adminModalInput');
+      const apwd = document.getElementById('adminModalPwd');
+      const aok = document.getElementById('adminOkBtn');
+      const acancel = document.getElementById('adminCancelBtn');
+
+      function setOpen(open){
+        regSwitch.checked = !!open;
+        regHelp.textContent = open ? '允许新用户注册' : '禁止新用户注册';
+      }
+      function smtpConfigValid(){
+        const host = document.getElementById('smtp_host').value.trim();
+        const port = document.getElementById('smtp_port').value.trim();
+        const username = document.getElementById('smtp_username').value.trim();
+        const sender = document.getElementById('smtp_sender').value.trim();
+        const pwVal = document.getElementById('smtp_password').value;
+        const passwordEffective = pwVal && pwVal.trim().length > 0 ? true : smtpPasswordSet;
+        const portNum = parseInt(port, 10);
+        return !!(host && username && sender && Number.isFinite(portNum) && portNum > 0 && passwordEffective);
+      }
+      function updateSmtpToggleState(){
+        // Keep toggle interactive; validation occurs on toggle/save and may revert state
+        const valid = smtpConfigValid();
+        if(!valid && smtpEnabledToggle.checked){
+          smtpEnabledToggle.checked = false;
+        }
+      }
+      async function loadConfig(){
+        const r = await fetch('/api/admin/config', { credentials:'include' });
+        const j = await r.json();
+        const c = j.config || {};
+        setOpen(!!c.registration_open);
+        document.getElementById('smtp_use_tls').checked = !!c.smtp_use_tls;
+        document.getElementById('smtp_enabled').checked = !!c.smtp_enabled;
+        document.getElementById('smtp_host').value = c.smtp_host || '';
+        document.getElementById('smtp_port').value = c.smtp_port || '';
+        document.getElementById('smtp_username').value = c.smtp_username || '';
+        smtpPasswordSet = !!c.smtp_password_set;
+        document.getElementById('smtp_password').placeholder = smtpPasswordSet ? '密码已设置（留空不改）' : '密码（留空不修改）';
+        document.getElementById('smtp_sender').value = c.smtp_sender || '';
+        const skipEl = document.getElementById('smtp_tls_skip_verify');
+        if(skipEl) skipEl.checked = !!c.smtp_tls_skip_verify;
+        updateSmtpToggleState();
+        // Turnstile
+        const tsEnabled = document.getElementById('turnstile_enabled');
+        const tsSite = document.getElementById('turnstile_site_key');
+        const tsSecret = document.getElementById('turnstile_secret_key');
+        const tsSkip = document.getElementById('turnstile_tls_skip_verify');
+        if(tsEnabled) tsEnabled.checked = !!c.turnstile_enabled;
+        if(tsSite) tsSite.value = c.turnstile_site_key || '';
+        tsSecretSet = !!c.turnstile_secret_set;
+        if(tsSecret) tsSecret.placeholder = (tsSecretSet ? 'Secret 已设置（留空不改）' : 'Secret Key（留空不修改）');
+        if(tsSkip) tsSkip.checked = !!c.turnstile_tls_skip_verify;
+      }
+      regSwitch.addEventListener('change', async ()=>{
+        const open = regSwitch.checked;
+        await fetch('/api/admin/config', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-CSRF-Token': csrf}, body: JSON.stringify({ registration_open: open }) });
+        setOpen(open);
+      });
+      // Live validate SMTP fields to enable/disable toggle
+      ['smtp_host','smtp_port','smtp_username','smtp_password','smtp_sender'].forEach(id=>{
+        document.getElementById(id).addEventListener('input', updateSmtpToggleState);
+      });
+      // Toggle SMTP enabled immediately with validation and automatic revert on failure
+      smtpEnabledToggle.addEventListener('change', async ()=>{
+        smtpMsg.textContent = '';
+        const enabled = smtpEnabledToggle.checked;
+        const body = {
+          smtp_enabled: enabled,
+          smtp_host: document.getElementById('smtp_host').value.trim(),
+          smtp_port: document.getElementById('smtp_port').value.trim(),
+          smtp_username: document.getElementById('smtp_username').value.trim(),
+          smtp_password: document.getElementById('smtp_password').value,
+          smtp_use_tls: document.getElementById('smtp_use_tls').checked,
+          smtp_sender: document.getElementById('smtp_sender').value.trim(),
+          smtp_tls_skip_verify: document.getElementById('smtp_tls_skip_verify') ? document.getElementById('smtp_tls_skip_verify').checked : false,
+        };
+        // Front-end guard: cannot enable without valid config
+        if(enabled && !smtpConfigValid()){
+          smtpMsg.textContent = '请先填写完整必填项再启用 SMTP';
+          smtpEnabledToggle.checked = false;
+          return;
+        }
+        // Do not overwrite saved password if input empty
+        if(!body.smtp_password) delete body.smtp_password;
+        try{
+          const r = await fetch('/api/admin/config', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-CSRF-Token': csrf}, body: JSON.stringify(body) });
+          const j = await r.json().catch(()=>({}));
+          if(!r.ok){
+            const map = { smtp_invalid: 'SMTP 配置无效，请完善后再启用' };
+            smtpMsg.textContent = (map[j.error] || (j.error || ('HTTP '+r.status)));
+            smtpEnabledToggle.checked = false; // revert on failure
+            return;
+          }
+          // success
+          if(enabled){
+            smtpMsg.textContent = '已启用 SMTP';
+            if(body.smtp_password && body.smtp_password.length>0){ smtpPasswordSet = true; }
+          }else{
+            smtpMsg.textContent = '已关闭 SMTP';
+          }
+          document.getElementById('smtp_password').value = '';
+        }catch(e){
+          smtpMsg.textContent = '保存失败：' + (e && e.message ? e.message : '未知错误');
+          smtpEnabledToggle.checked = false; // revert on error
+        }
+      });
+      document.getElementById('saveSmtpBtn').onclick = async ()=>{
+        smtpMsg.textContent = '';
+        const body = {
+          smtp_host: document.getElementById('smtp_host').value.trim(),
+          smtp_port: document.getElementById('smtp_port').value.trim(),
+          smtp_username: document.getElementById('smtp_username').value.trim(),
+          smtp_password: document.getElementById('smtp_password').value,
+          smtp_use_tls: document.getElementById('smtp_use_tls').checked,
+          smtp_sender: document.getElementById('smtp_sender').value.trim(),
+          smtp_tls_skip_verify: document.getElementById('smtp_tls_skip_verify') ? document.getElementById('smtp_tls_skip_verify').checked : false,
+          smtp_enabled: document.getElementById('smtp_enabled').checked,
+        };
+        // If password input is empty, don't send field to avoid overwrite
+        if(!body.smtp_password) delete body.smtp_password;
+        // Guard: cannot enable if config invalid
+        if(body.smtp_enabled && !smtpConfigValid()){
+          smtpMsg.textContent = '请先填写完整必填项再启用 SMTP';
+          return;
+        }
+        try{
+          const r = await fetch('/api/admin/config', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-CSRF-Token': csrf}, body: JSON.stringify(body) });
+          if(!r.ok){
+            const j = await r.json().catch(()=>({}));
+            // Revert toggle if enabling failed
+            if(body.smtp_enabled){ document.getElementById('smtp_enabled').checked = false; }
+            throw new Error(j.error||('HTTP '+r.status));
+          }
+          smtpMsg.textContent = '已保存';
+          // If password was provided and saved, mark as set for future validation
+          if(body.smtp_password && body.smtp_password.length>0){
+            smtpPasswordSet = true;
+          }
+          updateSmtpToggleState();
+        }catch(e){ smtpMsg.textContent = '保存失败：'+e.message }
+      };
+
+      // Save Turnstile config
+      const tsMsg = document.getElementById('tsMsg');
+      const saveTsBtn = document.getElementById('saveTsBtn');
+      if(saveTsBtn){
+        saveTsBtn.addEventListener('click', async ()=>{
+          if(tsMsg) tsMsg.textContent = '';
+          const enabled = document.getElementById('turnstile_enabled').checked;
+          const site = document.getElementById('turnstile_site_key').value.trim();
+          const secret = document.getElementById('turnstile_secret_key').value;
+          // Guard: when enabling, require site and either new secret or an already-set secret
+          if(enabled && (!site || (!secret && !tsSecretSet))){
+            if(tsMsg) tsMsg.textContent = '启用前请填写 Site Key 和 Secret Key';
+            return;
+          }
+          const payload = { turnstile_enabled: enabled, turnstile_site_key: site, turnstile_tls_skip_verify: (document.getElementById('turnstile_tls_skip_verify') ? document.getElementById('turnstile_tls_skip_verify').checked : false) };
+          if(secret) payload.turnstile_secret_key = secret; // omit if empty to keep existing
+          try{
+            const r = await fetch('/api/admin/config', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-CSRF-Token': csrf}, body: JSON.stringify(payload) });
+            const j = await r.json().catch(()=>({}));
+            if(!r.ok){
+              const map = { turnstile_invalid: '请输入有效的 Site/Secret Key 后再启用' };
+              // Revert toggle if enabling failed
+              if(enabled){ document.getElementById('turnstile_enabled').checked = false; }
+              throw new Error(map[j.error] || (j.error || ('HTTP '+r.status)));
+            }
+            if(tsMsg) tsMsg.textContent = '已保存';
+            await loadConfig();
+          }catch(e){ if(tsMsg) tsMsg.textContent = '保存失败：' + (e && e.message ? e.message : '未知错误'); }
+        });
+      }
+      // Toggle Turnstile enabled with validation and automatic revert
+      const tsEnabledToggle = document.getElementById('turnstile_enabled');
+      if(tsEnabledToggle){
+        tsEnabledToggle.addEventListener('change', async ()=>{
+          if(tsMsg) tsMsg.textContent = '';
+          const enabled = tsEnabledToggle.checked;
+          const site = document.getElementById('turnstile_site_key').value.trim();
+          const secret = document.getElementById('turnstile_secret_key').value;
+          // Guard: when enabling, require site and either new secret or an already-set secret
+          if(enabled && (!site || (!secret && !tsSecretSet))){
+            if(tsMsg) tsMsg.textContent = '启用前请填写 Site Key 和 Secret Key';
+            tsEnabledToggle.checked = false;
+            return;
+          }
+          const payload = { turnstile_enabled: enabled, turnstile_site_key: site, turnstile_tls_skip_verify: (document.getElementById('turnstile_tls_skip_verify') ? document.getElementById('turnstile_tls_skip_verify').checked : false) };
+          if(secret) payload.turnstile_secret_key = secret; // omit if empty to keep existing
+          try{
+            const r = await fetch('/api/admin/config', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-CSRF-Token': csrf}, body: JSON.stringify(payload) });
+            const j = await r.json().catch(()=>({}));
+            if(!r.ok){
+              const map = { turnstile_invalid: '请输入有效的 Site/Secret Key 后再启用' };
+              if(tsMsg) tsMsg.textContent = map[j.error] || (j.error || ('HTTP '+r.status));
+              tsEnabledToggle.checked = false; // revert
+              return;
+            }
+            if(enabled){ if(tsMsg) tsMsg.textContent = '已启用验证码'; } else { if(tsMsg) tsMsg.textContent = '已关闭验证码'; }
+            await loadConfig();
+          }catch(e){
+            if(tsMsg) tsMsg.textContent = '保存失败：' + (e && e.message ? e.message : '未知错误');
+            tsEnabledToggle.checked = false;
+          }
+        });
+      }
+
+      // Users table
+      let page = 1, sort = 'id', order = 'asc', q = '';
+      const tbody = document.getElementById('usersTbody');
+      const pageInfo = document.getElementById('pageInfo');
+      const usersMsg = document.getElementById('usersMsg');
+      const usersCountEl = document.getElementById('usersCount');
+      const currentUserEmail = document.getElementById('email').textContent.trim();
+      function rowHtml(u){
+        const isSelf = (u.email === currentUserEmail);
+        const pwdTitle = isSelf ? '无法在此修改自己的密码，请在上方“修改密码”' : '重置该用户密码';
+        const delTitle = isSelf ? '不能删除自己的账号' : '删除该用户';
+        return `
+          <tr>
+            <td style="padding:8px;border-bottom:1px solid var(--border)">${u.id}</td>
+            <td style="padding:8px;border-bottom:1px solid var(--border)">${escapeHtml(u.email)}</td>
+            <td style="padding:8px;border-bottom:1px solid var(--border)">${u.created_at}</td>
+            <td style="padding:8px;border-bottom:1px solid var(--border)">${u.todo_count}</td>
+            <td style="padding:8px;border-bottom:1px solid var(--border); white-space:nowrap">
+              <div class="row" style="gap:6px; flex-wrap:nowrap">
+                <button class="btn" data-act="pwd" data-id="${u.id}" data-email="${escapeHtml(u.email)}" ${isSelf?'disabled aria-disabled="true"':''} title="${pwdTitle}" aria-label="${pwdTitle}"><i class="fa-solid fa-key" style="${isSelf?'color:var(--border);opacity:.6;':''}"></i></button>
+                <button class="btn danger" data-act="del" data-id="${u.id}" data-email="${escapeHtml(u.email)}" ${isSelf?'disabled aria-disabled="true"':''} title="${delTitle}" aria-label="${delTitle}"><i class="fa-solid fa-user-xmark" style="${isSelf?'color:var(--border);opacity:.6;':''}"></i></button>
+              </div>
+            </td>
+          </tr>`;
+      }
+      async function loadUsers(){
+        const r = await fetch(`/api/admin/users?page=${page}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}&q=${encodeURIComponent(q)}`, { credentials:'include' });
+        const j = await r.json();
+        const list = j.users || [];
+        tbody.innerHTML = list.map(rowHtml).join('');
+        const total = j.total || 0;
+        const pages = Math.max(1, Math.ceil(total/10));
+        pageInfo.textContent = `第 ${page} / ${pages} 页 · 共 ${total} 用户`;
+        if(usersCountEl){ usersCountEl.innerHTML = `<i class="fa-solid fa-users"></i> 共 ${total} 用户`; }
+        usersMsg.textContent = '';
+      }
+      document.getElementById('prevPage').onclick = ()=>{ if(page>1){ page--; loadUsers(); }};
+      document.getElementById('nextPage').onclick = ()=>{ page++; loadUsers(); };
+      document.getElementById('searchBtn').onclick = ()=>{ q = document.getElementById('searchInput').value.trim(); page=1; loadUsers(); };
+      // 即时模糊搜索（防抖）
+      {
+        let t;
+        const si = document.getElementById('searchInput');
+        si.addEventListener('input', ()=>{
+          clearTimeout(t);
+          t = setTimeout(()=>{ q = si.value.trim(); page = 1; loadUsers(); }, 250);
+        });
+        si.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); q = si.value.trim(); page=1; loadUsers(); } });
+      }
+      document.querySelectorAll('th [data-sort]').forEach(btn=>{
+        btn.onclick = ()=>{
+          const s = btn.getAttribute('data-sort');
+          if(sort === s){ order = (order==='asc')?'desc':'asc'; }
+          else{ sort = s; order = 'asc'; }
+          page = 1; loadUsers();
+        };
+      });
+
+      tbody.addEventListener('click', (e)=>{
+        const btn = e.target.closest('button');
+        if(!btn) return;
+        if(btn.disabled) return; // 自身行已禁用操作
+        const id = parseInt(btn.getAttribute('data-id'), 10);
+        const email = btn.getAttribute('data-email');
+        const act = btn.getAttribute('data-act');
+        amsg.textContent = '';
+        ainput.value = '';
+        if(apwd){ apwd.value = ''; apwd.style.display = 'none'; }
+        amodal.style.display = 'flex';
+        amodal.setAttribute('aria-hidden','false');
+        if(act==='del'){
+          atitle.textContent = '删除用户确认';
+          abody.textContent = `将删除用户 ${email} 及其所有待办。请输入 CONFIRM 确认。`;
+          if(apwd){ apwd.style.display = 'none'; }
+          ainput.placeholder = '输入 CONFIRM 确认';
+          setTimeout(()=> ainput && ainput.focus(), 0);
+          aok.onclick = async ()=>{
+            if(ainput.value.trim() !== 'CONFIRM'){ amsg.textContent='请输入 CONFIRM'; return }
+            try{
+              const r = await fetch(`/api/admin/users/${id}`, { method:'DELETE', credentials:'include', headers: { 'X-CSRF-Token': csrf } });
+              if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.error||('HTTP '+r.status)); }
+              amodal.style.display = 'none';
+              loadUsers();
+            }catch(e){ amsg.textContent = '操作失败：'+e.message }
+          };
+        }else if(act==='pwd'){
+          atitle.textContent = '重置用户密码';
+          abody.textContent = `将为用户 ${email} 设置新密码。请在上方输入新密码，在下方输入 CONFIRM 确认。`;
+          if(apwd){ apwd.style.display = 'block'; }
+          ainput.placeholder = '输入 CONFIRM 确认';
+          setTimeout(()=> apwd && apwd.focus(), 0);
+          aok.onclick = async ()=>{
+            const newp = apwd ? apwd.value : '';
+            const key = ainput.value.trim();
+            if(key !== 'CONFIRM'){ amsg.textContent='请输入 CONFIRM 以确认'; return }
+            if(!newp || newp.length < 8){ amsg.textContent='新密码至少 8 位'; return }
+            try{
+              const r = await fetch(`/api/admin/users/${id}/password`, { method:'POST', credentials:'include', headers: { 'Content-Type':'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ new: newp }) });
+              if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.error||('HTTP '+r.status)); }
+              amodal.style.display = 'none';
+              usersMsg.textContent = '已更新密码';
+            }catch(e){ amsg.textContent = '操作失败：'+e.message }
+          };
+        }
+      });
+      acancel.onclick = ()=>{ amodal.style.display='none'; amsg.textContent=''; ainput.value=''; if(apwd){ apwd.value=''; apwd.style.display='none'; } };
+
+      // SMTP test modal logic
+      const testBtn = document.getElementById('testSmtpBtn');
+      const testModal = document.getElementById('smtpTestModal');
+      const testTo = document.getElementById('smtpTestTo');
+      const testMsg = document.getElementById('smtpTestMsg');
+      const testSend = document.getElementById('smtpTestSend');
+      const testCancel = document.getElementById('smtpTestCancel');
+
+      function openTestModal(){
+        if(testMsg) testMsg.textContent = '';
+        if(testTo) testTo.value = '';
+        if(testModal){
+          testModal.style.display = 'flex';
+          testModal.setAttribute('aria-hidden','false');
+          setTimeout(()=>testTo && testTo.focus(), 0);
+        }
+      }
+      function closeTestModal(){
+        if(testModal){
+          testModal.style.display = 'none';
+          testModal.setAttribute('aria-hidden','true');
+        }
+        if(testMsg) testMsg.textContent = '';
+        if(testTo) testTo.value = '';
+      }
+      if(testBtn){ testBtn.addEventListener('click', openTestModal); }
+      if(testCancel){ testCancel.addEventListener('click', closeTestModal); }
+      if(testSend){
+        testSend.addEventListener('click', async ()=>{
+          testMsg.textContent = '';
+          const to = (testTo.value||'').trim();
+          if(!to || !to.includes('@')){ testMsg.textContent='请输入有效的收件邮箱'; return }
+          testSend.disabled = true;
+          try{
+            const payload = {
+              to,
+              smtp_host: document.getElementById('smtp_host').value.trim(),
+              smtp_port: document.getElementById('smtp_port').value.trim(),
+              smtp_username: document.getElementById('smtp_username').value.trim(),
+              smtp_password: document.getElementById('smtp_password').value,
+              smtp_use_tls: document.getElementById('smtp_use_tls').checked,
+              smtp_sender: document.getElementById('smtp_sender').value.trim(),
+              smtp_tls_skip_verify: document.getElementById('smtp_tls_skip_verify') ? document.getElementById('smtp_tls_skip_verify').checked : false,
+            };
+            if(!payload.smtp_password) delete payload.smtp_password; // use saved password if empty
+            const r = await fetch('/api/admin/smtp_test', { method:'POST', credentials:'include', headers: { 'Content-Type':'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(payload) });
+            const j = await r.json().catch(()=>({}));
+            if(!r.ok){
+              const map = {
+                smtp_invalid: 'SMTP 配置无效，请检查必填项',
+                smtp_auth_failed: '认证失败，请检查用户名或密码',
+                smtp_send_failed: '发送失败，请检查主机/端口/网络'
+              };
+              const base = map[j.error] || ('发送失败：' + (j.error || ('HTTP '+r.status)));
+              const extra = j.detail ? `（${j.detail}）` : '';
+              testMsg.textContent = base + extra;
+              return;
+            }
+            testMsg.textContent = '测试邮件已发送（请检查收件箱/垃圾箱）';
+          }catch(e){
+            // Network or unexpected errors
+            testMsg.textContent = '发送失败：' + (e && e.message ? e.message : '未知错误');
+          }finally{
+            testSend.disabled = false;
+          }
+        });
+      }
+
+      // init
+      loadConfig().then(loadUsers).catch(()=>{});
+      // Users fullscreen toggle
+      const usersPanel = document.getElementById('usersPanel');
+      const usersFsBtn = document.getElementById('usersFullscreenBtn');
+      const usersFsIcon = document.getElementById('usersFsIcon');
+      if(usersFsBtn && usersPanel){
+        usersFsBtn.addEventListener('click', ()=>{
+          // add anim class; subtle scale for clearer zoom perception
+          usersPanel.classList.add('fs-anim');
+          usersPanel.style.transform = 'scale(0.4)';
+          usersPanel.style.opacity = '0';
+          setTimeout(()=>{
+            const on = usersPanel.classList.toggle('fullscreen');
+            document.body.classList.toggle('users-fullscreen', on);
+            usersFsBtn.title = on ? '退出全屏' : '全屏';
+            usersFsBtn.setAttribute('aria-label', usersFsBtn.title);
+            // icon fade + rotate
+            if(usersFsIcon){
+              usersFsIcon.style.opacity = '0';
+              setTimeout(()=>{
+                usersFsIcon.className = 'fa-solid ' + (on ? 'fa-down-left-and-up-right-to-center' : 'fa-up-right-and-down-left-from-center');
+                usersFsIcon.style.opacity = '1';
+              }, 160);
+            }
+            // fade + scale back in
+            requestAnimationFrame(()=>{
+              usersPanel.style.opacity = '1';
+              usersPanel.style.transform = 'scale(1)';
+              setTimeout(()=>{
+                usersPanel.classList.remove('fs-anim');
+                usersPanel.style.opacity='';
+                usersPanel.style.transform='';
+              }, 420);
+            });
+          }, 40);
+        });
+      }
+      {% endif %}
   </script>
     <script src="/static/js/theme.js"></script>
     <footer class="site-footer">

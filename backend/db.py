@@ -44,5 +44,29 @@ def init_db():
         """
     )
     cur.execute("CREATE INDEX IF NOT EXISTS idx_todos_user_position ON todos(user_id, position);")
+    # App settings key-value table
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+        """
+    )
+    # Seed defaults if not present
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('registration_open','1')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('smtp_enabled','0')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('smtp_host','')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('smtp_port','')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('smtp_username','')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('smtp_password','')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('smtp_use_tls','1')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('smtp_sender','')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('smtp_tls_skip_verify','0')")
+    # Turnstile (captcha) defaults
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('turnstile_enabled','0')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('turnstile_site_key','')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('turnstile_secret_key','')")
+    cur.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('turnstile_tls_skip_verify','0')")
     conn.commit()
     conn.close()

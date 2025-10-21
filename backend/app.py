@@ -1,9 +1,16 @@
 import os
+import re
+import smtplib
+import ssl
 import secrets
+import json
+import urllib.parse
+import urllib.request
 from datetime import timedelta
 from functools import wraps
 
 from flask import Flask, jsonify, request, session, render_template, redirect, url_for
+from email.message import EmailMessage
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from db import get_conn, init_db
@@ -43,6 +50,17 @@ def create_app():
     def current_user_id():
         return session.get('user_id')
 
+    def is_admin_user(user_id=None) -> bool:
+        uid = user_id if user_id is not None else current_user_id()
+        if not uid:
+            return False
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MIN(id) AS min_id FROM users")
+        row = cur.fetchone()
+        conn.close()
+        return bool(row and row['min_id'] and int(row['min_id']) == int(uid))
+
     def login_required(f):
         @wraps(f)
         def wrapped(*args, **kwargs):
@@ -67,12 +85,43 @@ def create_app():
         for idx, tid in enumerate(ids):
             cur.execute("UPDATE todos SET position=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", (idx, tid))
 
+    # Settings helpers
+    def get_setting(key, default=None):
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = cur.fetchone()
+        conn.close()
+        return row['value'] if row and row['value'] is not None else default
+
+    def set_settings(pairs):
+        if not pairs:
+            return
+        conn = get_conn()
+        cur = conn.cursor()
+        for k, v in pairs.items():
+            cur.execute("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, str(v) if v is not None else ''))
+        conn.commit()
+        conn.close()
+
     # --- Page routes (Jinja2) ---
     @app.get('/login')
     def login_page():
         if current_user_id():
             return redirect(url_for('home'))
-        return render_template('login.html', title='登录 / 注册 - EasyTodo')
+        # read toggles
+        registration_open = (get_setting('registration_open', '1') or '1') == '1'
+        smtp_enabled = (get_setting('smtp_enabled', '0') or '0') == '1'
+        turnstile_enabled = (get_setting('turnstile_enabled', '0') or '0') == '1'
+        turnstile_site_key = get_setting('turnstile_site_key', '') or ''
+        return render_template(
+            'login.html',
+            title='登录 / 注册 - EasyTodo',
+            registration_open=registration_open,
+            smtp_enabled=smtp_enabled,
+            turnstile_enabled=turnstile_enabled,
+            turnstile_site_key=turnstile_site_key,
+        )
 
     @app.get('/')
     @login_required
@@ -91,7 +140,7 @@ def create_app():
         row = cur.fetchone()
         conn.close()
         email = row['email'] if row else ''
-        return render_template('settings.html', title='设置 - EasyTodo', csrf_token=token, email=email)
+        return render_template('settings.html', title='设置 - EasyTodo', csrf_token=token, email=email, is_admin=is_admin_user(uid))
 
     # --- Auth ---
     @app.post('/api/auth/register')
@@ -108,8 +157,15 @@ def create_app():
             return jsonify(error='weak_password'), 400
         if len(password) < 8:
             return jsonify(error='weak_password'), 400
+        # Registration toggle: allow if open OR there are no users yet
         conn = get_conn()
         cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS c FROM users")
+        cnt = int(cur.fetchone()['c'])
+        registration_open = (get_setting('registration_open', '1') or '1') == '1'
+        if not registration_open and cnt > 0:
+            conn.close()
+            return jsonify(error='registration_closed'), 403
         try:
             cur.execute("INSERT INTO users(email, password_hash) VALUES(?, ?)", (email, generate_password_hash(password)))
             conn.commit()
@@ -179,6 +235,9 @@ def create_app():
         if not require_csrf():
             return jsonify(error='bad_csrf'), 403
         uid = current_user_id()
+        # Protect admin account from deletion via API
+        if is_admin_user(uid):
+            return jsonify(error='admin_protected'), 403
         conn = get_conn()
         cur = conn.cursor()
         try:
@@ -188,6 +247,534 @@ def create_app():
         finally:
             conn.close()
         session.clear()
+        return jsonify(ok=True)
+
+    # --- Admin-only APIs ---
+    def admin_required(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            if not current_user_id():
+                return jsonify(error='unauthorized'), 401
+            if not is_admin_user():
+                return jsonify(error='forbidden'), 403
+            return f(*args, **kwargs)
+        return wrapped
+
+    @app.get('/api/admin/config')
+    @login_required
+    @admin_required
+    def admin_get_config():
+        cfg = {
+            'registration_open': (get_setting('registration_open', '1') or '1') == '1',
+            'smtp_enabled': (get_setting('smtp_enabled', '0') or '0') == '1',
+            'smtp_host': get_setting('smtp_host', '') or '',
+            'smtp_port': get_setting('smtp_port', '') or '',
+            'smtp_username': get_setting('smtp_username', '') or '',
+            # Do not return password content; indicate if set
+            'smtp_password_set': bool(get_setting('smtp_password', '') or ''),
+            'smtp_use_tls': (get_setting('smtp_use_tls', '1') or '1') == '1',
+            'smtp_sender': get_setting('smtp_sender', '') or '',
+            'smtp_tls_skip_verify': (get_setting('smtp_tls_skip_verify', '0') or '0') == '1',
+            # Turnstile
+            'turnstile_enabled': (get_setting('turnstile_enabled', '0') or '0') == '1',
+            'turnstile_site_key': get_setting('turnstile_site_key', '') or '',
+            'turnstile_secret_set': bool(get_setting('turnstile_secret_key', '') or ''),
+            'turnstile_tls_skip_verify': (get_setting('turnstile_tls_skip_verify', '0') or '0') == '1',
+        }
+        return jsonify(config=cfg)
+
+    @app.post('/api/admin/config')
+    @login_required
+    @admin_required
+    def admin_set_config():
+        if not require_csrf():
+            return jsonify(error='bad_csrf'), 403
+        data = request.get_json(silent=True) or {}
+        updates = {}
+        # Read current settings to validate effective values when enabling SMTP/Turnstile
+        current_cfg = {
+            'smtp_enabled': (get_setting('smtp_enabled', '0') or '0') == '1',
+            'smtp_host': get_setting('smtp_host', '') or '',
+            'smtp_port': get_setting('smtp_port', '') or '',
+            'smtp_username': get_setting('smtp_username', '') or '',
+            'smtp_password': get_setting('smtp_password', '') or '',
+            'smtp_sender': get_setting('smtp_sender', '') or '',
+            'smtp_tls_skip_verify': (get_setting('smtp_tls_skip_verify', '0') or '0') == '1',
+            'turnstile_enabled': (get_setting('turnstile_enabled', '0') or '0') == '1',
+            'turnstile_site_key': get_setting('turnstile_site_key', '') or '',
+            'turnstile_secret_key': get_setting('turnstile_secret_key', '') or '',
+            'turnstile_tls_skip_verify': (get_setting('turnstile_tls_skip_verify', '0') or '0') == '1',
+        }
+        if 'registration_open' in data:
+            updates['registration_open'] = '1' if bool(data.get('registration_open')) else '0'
+        if 'smtp_enabled' in data:
+            updates['smtp_enabled'] = '1' if bool(data.get('smtp_enabled')) else '0'
+        if 'smtp_host' in data:
+            updates['smtp_host'] = (data.get('smtp_host') or '').strip()
+        if 'smtp_port' in data:
+            updates['smtp_port'] = str(data.get('smtp_port') or '').strip()
+        if 'smtp_username' in data:
+            updates['smtp_username'] = (data.get('smtp_username') or '').strip()
+        if 'smtp_use_tls' in data:
+            updates['smtp_use_tls'] = '1' if bool(data.get('smtp_use_tls')) else '0'
+        if 'smtp_sender' in data:
+            updates['smtp_sender'] = (data.get('smtp_sender') or '').strip()
+        if 'smtp_tls_skip_verify' in data:
+            updates['smtp_tls_skip_verify'] = '1' if bool(data.get('smtp_tls_skip_verify')) else '0'
+        # Track if a new password is explicitly provided (even empty to clear)
+        new_password = None
+        if data.get('smtp_password') is not None:
+            # Only update if explicitly provided
+            new_password = str(data.get('smtp_password') or '')
+            updates['smtp_password'] = new_password
+
+        # Turnstile updates
+        if 'turnstile_enabled' in data:
+            updates['turnstile_enabled'] = '1' if bool(data.get('turnstile_enabled')) else '0'
+        if 'turnstile_site_key' in data:
+            updates['turnstile_site_key'] = (data.get('turnstile_site_key') or '').strip()
+        # For secret, only update when explicitly present; allow empty to clear
+        if data.get('turnstile_secret_key') is not None:
+            updates['turnstile_secret_key'] = str(data.get('turnstile_secret_key') or '')
+        if 'turnstile_tls_skip_verify' in data:
+            updates['turnstile_tls_skip_verify'] = '1' if bool(data.get('turnstile_tls_skip_verify')) else '0'
+
+        # Validate when attempting to enable SMTP
+        # Compute the effective final values (incoming value if provided, else current)
+        incoming_enabled = data.get('smtp_enabled')
+        effective_enabled = bool(incoming_enabled) if incoming_enabled is not None else bool(current_cfg['smtp_enabled'])
+        if effective_enabled:
+            effective_host = (data.get('smtp_host') if 'smtp_host' in data else current_cfg['smtp_host']).strip()
+            effective_port = str(data.get('smtp_port') if 'smtp_port' in data else current_cfg['smtp_port']).strip()
+            effective_username = (data.get('smtp_username') if 'smtp_username' in data else current_cfg['smtp_username']).strip()
+            effective_sender = (data.get('smtp_sender') if 'smtp_sender' in data else current_cfg['smtp_sender']).strip()
+            effective_skip_verify = bool(data.get('smtp_tls_skip_verify')) if 'smtp_tls_skip_verify' in data else bool(current_cfg['smtp_tls_skip_verify'])
+            # Password considered set if new non-empty provided, else existing non-empty remains
+            if new_password is not None:
+                effective_password_set = new_password.strip() != ''
+            else:
+                effective_password_set = (current_cfg['smtp_password'] or '').strip() != ''
+
+            # Basic validations: non-empty host/username/sender, numeric port > 0, password set
+            try:
+                port_int = int(effective_port)
+            except Exception:
+                port_int = -1
+            if not effective_host or not effective_username or not effective_sender or port_int <= 0 or not effective_password_set:
+                return jsonify(error='smtp_invalid'), 400
+
+        # Validate when attempting to enable Turnstile
+        incoming_ts_enabled = data.get('turnstile_enabled')
+        effective_ts_enabled = bool(incoming_ts_enabled) if incoming_ts_enabled is not None else bool(current_cfg['turnstile_enabled'])
+        if effective_ts_enabled:
+            effective_site = (data.get('turnstile_site_key') if 'turnstile_site_key' in data else current_cfg['turnstile_site_key']).strip()
+            # Secret is considered set if explicit non-empty provided or already present
+            if data.get('turnstile_secret_key') is not None:
+                secret_set = str(data.get('turnstile_secret_key') or '').strip() != ''
+            else:
+                secret_set = (current_cfg['turnstile_secret_key'] or '').strip() != ''
+            if not effective_site or not secret_set:
+                return jsonify(error='turnstile_invalid'), 400
+
+        set_settings(updates)
+        return jsonify(ok=True)
+
+    # ---- Forgot Password (with optional Turnstile + arithmetic challenge) ----
+    @app.post('/api/auth/forgot/start')
+    def forgot_start():
+        data = request.get_json(silent=True) or {}
+        email = (data.get('email') or '').strip().lower()
+        if not email or '@' not in email:
+            return jsonify(error='invalid_email'), 400
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE email=?", (email,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return jsonify(error='not_found'), 404
+        # Generate simple arithmetic challenge and store in session
+        a = secrets.randbelow(10) + 1
+        b = secrets.randbelow(10) + 1
+        op = '+' if secrets.randbelow(2) == 0 else '-'
+        ans = a + b if op == '+' else a - b
+        # keep email bound to challenge
+        session['fp'] = {
+            'email': email,
+            'ans': str(ans),
+        }
+        session.permanent = True
+        return jsonify(ok=True, challenge=f"{a} {op} {b} = ?")
+
+    def _client_ip_from_headers() -> str:
+        # Prefer Cloudflare/Proxy forwarded IPs when present
+        cf_ip = request.headers.get('CF-Connecting-IP')
+        if cf_ip:
+            return cf_ip.strip()
+        xff = request.headers.get('X-Forwarded-For')
+        if xff:
+            # Use left-most IP
+            return xff.split(',')[0].strip()
+        return ''
+
+    def verify_turnstile(token: str):
+        enabled = (get_setting('turnstile_enabled', '0') or '0') == '1'
+        if not enabled:
+            return True, None
+        secret = get_setting('turnstile_secret_key', '') or ''
+        if not secret:
+            return False, ['invalid-input-secret']
+        try:
+            # Only send required fields; omit remote IP to avoid proxy/IP mismatches
+            payload_dict = {
+                'secret': secret,
+                'response': token or '',
+            }
+            # Include real client IP when reliably available (CF/XFF)
+            cip = _client_ip_from_headers()
+            if cip:
+                payload_dict['remoteip'] = cip
+            data = urllib.parse.urlencode(payload_dict).encode('utf-8')
+            # SSL context: try certifi CA; allow admin to skip verify if needed
+            skip_verify = (get_setting('turnstile_tls_skip_verify', '0') or '0') == '1'
+            try:
+                import ssl as _ssl
+                context = _ssl.create_default_context()
+                if not skip_verify:
+                    try:
+                        import certifi
+                        context.load_verify_locations(cafile=certifi.where())
+                    except Exception:
+                        pass
+                else:
+                    context.check_hostname = False
+                    context.verify_mode = _ssl.CERT_NONE
+            except Exception:
+                context = None
+            req = urllib.request.Request(
+                'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+                data=data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            )
+            # Pass context when available (HTTPS only)
+            if context is not None:
+                resp_ctx = urllib.request.urlopen(req, timeout=10, context=context)
+            else:
+                resp_ctx = urllib.request.urlopen(req, timeout=10)
+            with resp_ctx as resp:
+                payload = resp.read()
+                try:
+                    j = json.loads(payload.decode('utf-8'))
+                except Exception:
+                    return False, ['bad-json']
+                ok = bool(j.get('success'))
+                errs = j.get('error-codes') or []
+                if not ok:
+                    # Best-effort log for diagnostics
+                    try:
+                        app.logger.info('Turnstile verify failed: %s ip=%s', errs, cip)
+                    except Exception:
+                        pass
+                return ok, errs
+        except Exception as e:
+            try:
+                app.logger.warning('Turnstile verify exception: %s', e)
+            except Exception:
+                pass
+            return False, ['network-error']
+
+    def _send_email_with_settings(to_addr: str, subject: str, content: str):
+        # Load saved SMTP
+        host = (get_setting('smtp_host', '') or '').strip()
+        port_s = (get_setting('smtp_port', '') or '').strip()
+        username = (get_setting('smtp_username', '') or '').strip()
+        password = get_setting('smtp_password', '') or ''
+        use_tls = (get_setting('smtp_use_tls', '1') or '1') == '1'
+        sender = (get_setting('smtp_sender', '') or '').strip()
+        skip_verify = (get_setting('smtp_tls_skip_verify', '0') or '0') == '1'
+        try:
+            port = int(port_s)
+        except Exception:
+            port = -1
+        if not host or port <= 0 or not username or not password or not sender:
+            return False, 'smtp_invalid'
+        try:
+            msg = EmailMessage()
+            msg['Subject'] = subject
+            msg['From'] = sender
+            msg['To'] = to_addr
+            msg.set_content(content)
+            if use_tls and port == 465:
+                context = ssl.create_default_context()
+                if skip_verify:
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                with smtplib.SMTP_SSL(host, port, context=context, timeout=15) as server:
+                    server.login(username, password)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(host, port, timeout=15) as server:
+                    server.ehlo()
+                    if use_tls:
+                        context = ssl.create_default_context()
+                        if skip_verify:
+                            context.check_hostname = False
+                            context.verify_mode = ssl.CERT_NONE
+                        server.starttls(context=context)
+                        server.ehlo()
+                    server.login(username, password)
+                    server.send_message(msg)
+        except smtplib.SMTPAuthenticationError:
+            return False, 'smtp_auth_failed'
+        except Exception:
+            return False, 'smtp_send_failed'
+        return True, None
+
+    @app.post('/api/auth/forgot/confirm')
+    def forgot_confirm():
+        data = request.get_json(silent=True) or {}
+        email = (data.get('email') or '').strip().lower()
+        answer = str(data.get('answer') or '').strip()
+        token = data.get('turnstile_token')
+        if not email or '@' not in email:
+            return jsonify(error='invalid_email'), 400
+        # Validate session challenge
+        fp = session.get('fp') or {}
+        if not fp or fp.get('email') != email or str(fp.get('ans')) != answer:
+            return jsonify(error='bad_challenge'), 400
+        # Verify Turnstile if enabled
+        ok_ts, errs = verify_turnstile(token or '')
+        if not ok_ts:
+            return jsonify(error='turnstile_failed', detail=(','.join(errs) if errs else '')), 400
+        # Ensure user exists
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE email=?", (email,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify(error='not_found'), 404
+        user_id = row['id']
+        # Generate new password
+        alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#%_'
+        new_pw = ''.join(alphabet[secrets.randbelow(len(alphabet))] for _ in range(12))
+        # Send email first
+        ok, err = _send_email_with_settings(
+            to_addr=email,
+            subject='EasyTodo 密码重置',
+            content=f'你的新密码为：{new_pw}\n\n请使用该密码登录，并尽快在设置页修改密码。',
+        )
+        if not ok:
+            return jsonify(error=err or 'smtp_send_failed'), 500
+        # Update password in DB
+        cur.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(new_pw), user_id))
+        conn.commit()
+        conn.close()
+        # Clear challenge
+        try:
+            session.pop('fp', None)
+        except Exception:
+            pass
+        return jsonify(ok=True)
+
+    @app.post('/api/admin/smtp_test')
+    @login_required
+    @admin_required
+    def admin_smtp_test():
+        if not require_csrf():
+            return jsonify(error='bad_csrf'), 403
+        data = request.get_json(silent=True) or {}
+        to_addr = (data.get('to') or '').strip()
+        if not to_addr or '@' not in to_addr:
+            return jsonify(error='invalid_to'), 400
+        # Load saved config
+        saved = {
+            'host': get_setting('smtp_host', '') or '',
+            'port': get_setting('smtp_port', '') or '',
+            'username': get_setting('smtp_username', '') or '',
+            'password': get_setting('smtp_password', '') or '',
+            'use_tls': (get_setting('smtp_use_tls', '1') or '1') == '1',
+            'sender': get_setting('smtp_sender', '') or '',
+            'skip_verify': (get_setting('smtp_tls_skip_verify', '0') or '0') == '1',
+        }
+        # Apply overrides from request (do not persist)
+        host = (data.get('smtp_host') if 'smtp_host' in data else saved['host']).strip()
+        port_s = str(data.get('smtp_port') if 'smtp_port' in data else saved['port']).strip()
+        username = (data.get('smtp_username') if 'smtp_username' in data else saved['username']).strip()
+        sender = (data.get('smtp_sender') if 'smtp_sender' in data else saved['sender']).strip()
+        use_tls = bool(data.get('smtp_use_tls')) if 'smtp_use_tls' in data else bool(saved['use_tls'])
+        skip_verify = bool(data.get('smtp_tls_skip_verify')) if 'smtp_tls_skip_verify' in data else bool(saved['skip_verify'])
+        if data.get('smtp_password') is not None:
+            password = str(data.get('smtp_password') or '')
+        else:
+            password = saved['password']
+        try:
+            port = int(port_s)
+        except Exception:
+            port = -1
+        # Validate effective config with specific hints
+        invalid_reasons = []
+        if not host:
+            invalid_reasons.append('主机未设置')
+        if port <= 0:
+            invalid_reasons.append('端口无效')
+        if not username:
+            invalid_reasons.append('用户名未设置')
+        if not password:
+            invalid_reasons.append('密码未设置')
+        if not sender:
+            invalid_reasons.append('发件人未设置')
+        if invalid_reasons:
+            return jsonify(error='smtp_invalid', detail='；'.join(invalid_reasons)), 400
+
+        # Send test email
+        try:
+            msg = EmailMessage()
+            msg['Subject'] = 'EasyTodo 邮件测试'
+            msg['From'] = sender
+            msg['To'] = to_addr
+            msg.set_content('这是一封来自 EasyTodo 的测试邮件。若你收到此邮件，说明 SMTP 配置可用。')
+
+            if use_tls and port == 465:
+                context = ssl.create_default_context()
+                if skip_verify:
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                with smtplib.SMTP_SSL(host, port, context=context, timeout=15) as server:
+                    server.login(username, password)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(host, port, timeout=15) as server:
+                    server.ehlo()
+                    if use_tls:
+                        context = ssl.create_default_context()
+                        if skip_verify:
+                            context.check_hostname = False
+                            context.verify_mode = ssl.CERT_NONE
+                        server.starttls(context=context)
+                        server.ehlo()
+                    server.login(username, password)
+                    server.send_message(msg)
+        except smtplib.SMTPAuthenticationError as e:
+            # Authentication problems: surface concise reason to the admin
+            try:
+                detail = str(e)
+            except Exception:
+                detail = 'authentication failed'
+            app.logger.warning('SMTP auth failed: %s', detail)
+            return jsonify(error='smtp_auth_failed', detail=detail), 400
+        except smtplib.SMTPResponseException as e:
+            # Server returned an SMTP error code and message
+            code = getattr(e, 'smtp_code', None)
+            err = getattr(e, 'smtp_error', b'')
+            try:
+                err_str = err.decode('utf-8', errors='ignore') if isinstance(err, (bytes, bytearray)) else str(err)
+            except Exception:
+                err_str = str(err)
+            detail = f"{code} {err_str}" if code else err_str
+            app.logger.warning('SMTP response error: %s', detail)
+            return jsonify(error='smtp_send_failed', detail=detail), 500
+        except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, smtplib.SMTPHeloError, smtplib.SMTPDataError,
+                smtplib.SMTPSenderRefused, smtplib.SMTPRecipientsRefused, ssl.SSLError, TimeoutError) as e:
+            # Connection/handshake/data issues: return detail for admin to diagnose
+            detail = str(e)
+            app.logger.warning('SMTP send failed: %s', detail)
+            return jsonify(error='smtp_send_failed', detail=detail), 500
+        except Exception as e:
+            # Unexpected error; include class name for context while avoiding secrets
+            detail = f"{e.__class__.__name__}: {e}"
+            app.logger.exception('SMTP test unexpected failure')
+            return jsonify(error='smtp_send_failed', detail=detail), 500
+
+        return jsonify(ok=True)
+
+    @app.get('/api/admin/users')
+    @login_required
+    @admin_required
+    def admin_list_users():
+        # query params
+        try:
+            page = max(1, int(request.args.get('page', '1')))
+        except Exception:
+            page = 1
+        page_size = 10
+        q = (request.args.get('q') or '').strip().lower()
+        sort_by = request.args.get('sort', 'id')
+        order = request.args.get('order', 'asc')
+        allowed_sort = {'id': 'u.id', 'email': 'u.email', 'created_at': 'u.created_at', 'todo_count': 'todo_count'}
+        sort_sql = allowed_sort.get(sort_by, 'u.id')
+        order_sql = 'DESC' if order.lower() == 'desc' else 'ASC'
+        offset = (page - 1) * page_size
+
+        conn = get_conn()
+        cur = conn.cursor()
+        where = ''
+        args = []
+        if q:
+            where = 'WHERE LOWER(u.email) LIKE ?'
+            args.append(f'%{q}%')
+        # total count
+        cur.execute(f"SELECT COUNT(*) AS c FROM users u {where}", tuple(args))
+        total = int(cur.fetchone()['c'])
+        # page rows with todo count
+        cur.execute(
+            f"""
+            SELECT u.id, u.email, u.created_at, COALESCE(COUNT(t.id),0) AS todo_count
+            FROM users u
+            LEFT JOIN todos t ON t.user_id = u.id
+            {where}
+            GROUP BY u.id
+            ORDER BY {sort_sql} {order_sql}
+            LIMIT ? OFFSET ?
+            """,
+            tuple(args + [page_size, offset])
+        )
+        rows = [dict(id=r['id'], email=r['email'], created_at=r['created_at'], todo_count=r['todo_count']) for r in cur.fetchall()]
+        conn.close()
+        return jsonify(users=rows, total=total, page=page, page_size=page_size)
+
+    @app.post('/api/admin/users/<int:uid_target>/password')
+    @login_required
+    @admin_required
+    def admin_change_user_password(uid_target: int):
+        if not require_csrf():
+            return jsonify(error='bad_csrf'), 403
+        data = request.get_json(silent=True) or {}
+        new = data.get('new') or ''
+        if len(new) < 8:
+            return jsonify(error='weak_password'), 400
+        # Protect admin account: 禁止通过管理端接口修改管理员（自身）密码
+        if current_user_id() == uid_target:
+            return jsonify(error='admin_protected'), 403
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(new), uid_target))
+        conn.commit()
+        conn.close()
+        return jsonify(ok=True)
+
+    @app.delete('/api/admin/users/<int:uid_target>')
+    @login_required
+    @admin_required
+    def admin_delete_user(uid_target: int):
+        if not require_csrf():
+            return jsonify(error='bad_csrf'), 403
+        # Protect admin account: 禁止管理员删除自己
+        if current_user_id() == uid_target:
+            return jsonify(error='admin_protected'), 403
+        # Prevent deletion of the primary admin
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MIN(id) AS min_id FROM users")
+        minrow = cur.fetchone()
+        min_id = int(minrow['min_id']) if minrow and minrow['min_id'] is not None else None
+        if min_id is not None and uid_target == min_id:
+            conn.close()
+            return jsonify(error='admin_protected'), 403
+        cur.execute("DELETE FROM todos WHERE user_id=?", (uid_target,))
+        cur.execute("DELETE FROM users WHERE id=?", (uid_target,))
+        conn.commit()
+        conn.close()
         return jsonify(ok=True)
 
     # --- Todos ---
