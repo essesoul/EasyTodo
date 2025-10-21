@@ -1,3 +1,6 @@
+<img width="616" height="435" alt="image" src="https://github.com/user-attachments/assets/0577f938-ce0f-4db2-bf28-93bda839a5cf" />
+
+
 # EasyTodo 简单易用的个人待办列表
 
 一个基于 Flask + SQLite 的轻量待办应用，开箱即用，支持暗黑模式、拖拽排序与账号数据清除。
