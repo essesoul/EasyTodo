@@ -1,4 +1,4 @@
-<img width="616" height="435" alt="image" src="https://github.com/user-attachments/assets/0577f938-ce0f-4db2-bf28-93bda839a5cf" />
+<img width="1085" height="595" alt="image" src="https://github.com/user-attachments/assets/d5ff090d-b87c-421f-941d-e53362f16bba" />
 
 
 # EasyTodo 简单易用的个人待办列表
