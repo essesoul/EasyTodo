@@ -220,7 +220,7 @@
       <div id="smtpTestModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
         <div class="modal">
           <h4 class="modal-title">测试发送邮件</h4>
-          <p class="note">测试将使用当前表单中的 SMTP 配置（不会保存）。</p>
+          <p class="note">测试将使用当前表单中的 SMTP 配置。</p>
           <input id="smtpTestTo" type="email" placeholder="收件邮箱" />
           <div class="modal-actions">
             <button id="smtpTestCancel" class="btn">取消</button>
@@ -532,6 +532,8 @@
       const pageInfo = document.getElementById('pageInfo');
       const usersMsg = document.getElementById('usersMsg');
       const usersCountEl = document.getElementById('usersCount');
+      const prevBtn = document.getElementById('prevPage');
+      const nextBtn = document.getElementById('nextPage');
       const currentUserEmail = document.getElementById('email').textContent.trim();
       function rowHtml(u){
         const isSelf = (u.email === currentUserEmail);
@@ -558,12 +560,25 @@
         tbody.innerHTML = list.map(rowHtml).join('');
         const total = j.total || 0;
         const pages = Math.max(1, Math.ceil(total/10));
+        // 若当前页超过可用总页数，则回退到最后一页并重载
+        if(page > pages){ page = pages; return loadUsers(); }
         pageInfo.textContent = `第 ${page} / ${pages} 页 · 共 ${total} 用户`;
         if(usersCountEl){ usersCountEl.innerHTML = `<i class="fa-solid fa-users"></i> 共 ${total} 用户`; }
         usersMsg.textContent = '';
+        // 更新翻页按钮可用状态
+        if(prevBtn){
+          const disabled = page <= 1;
+          prevBtn.disabled = disabled;
+          prevBtn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+        }
+        if(nextBtn){
+          const disabled = page >= pages;
+          nextBtn.disabled = disabled;
+          nextBtn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+        }
       }
-      document.getElementById('prevPage').onclick = ()=>{ if(page>1){ page--; loadUsers(); }};
-      document.getElementById('nextPage').onclick = ()=>{ page++; loadUsers(); };
+      if(prevBtn){ prevBtn.onclick = ()=>{ if(page>1){ page--; loadUsers(); } }; }
+      if(nextBtn){ nextBtn.onclick = ()=>{ if(!nextBtn.disabled){ page++; loadUsers(); } }; }
       document.getElementById('searchBtn').onclick = ()=>{ q = document.getElementById('searchInput').value.trim(); page=1; loadUsers(); };
       // 即时模糊搜索（防抖）
       {
