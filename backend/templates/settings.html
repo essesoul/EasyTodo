@@ -8,12 +8,20 @@
     <link rel="icon" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/css/global.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <script>
+      // Early apply theme to avoid flash
+      (function(){
+        var t = localStorage.getItem('theme');
+        if(t==='dark'||t==='light') document.documentElement.setAttribute('data-theme', t);
+      })();
+    </script>
   </head>
   <body>
     <div class="container">
       <div class="toolbar">
         <button id="backBtn" class="btn icon" title="返回" aria-label="返回"><i class="fa-solid fa-arrow-left"></i></button>
         <div class="spacer"></div>
+        <button id="themeBtn" class="btn icon" title="切换明暗" aria-label="切换明暗"><i class="fa-solid fa-circle-half-stroke"></i></button>
         <button id="logoutBtn" class="btn icon" title="退出登录" aria-label="退出登录"><i class="fa-solid fa-right-from-bracket"></i></button>
       </div>
 
@@ -107,6 +115,7 @@
         }catch(e){ delMsg.textContent = '删除失败'; }
       };
   </script>
+    <script src="/static/js/theme.js"></script>
     <footer class="site-footer">
       Copyright @<a href="https://github.com/essesoul/EasyTodo" target="_blank" rel="noopener noreferrer">essesoul</a>
     </footer>

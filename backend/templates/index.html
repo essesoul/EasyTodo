@@ -8,6 +8,13 @@
     <link rel="icon" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/css/global.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <script>
+      // Early apply theme to avoid flash
+      (function(){
+        var t = localStorage.getItem('theme');
+        if(t==='dark'||t==='light') document.documentElement.setAttribute('data-theme', t);
+      })();
+    </script>
   </head>
   <body>
     <div class="container">
@@ -32,18 +39,7 @@
     </div>
 
     <script>
-      // --- Theme (auto + manual) ---
-      (function initTheme(){
-        const saved = localStorage.getItem('theme');
-        if(saved==='dark' || saved==='light') document.documentElement.setAttribute('data-theme', saved);
-      })();
-      document.getElementById('themeBtn').onclick = () => {
-        const current = document.documentElement.getAttribute('data-theme');
-        const next = current === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('theme', next);
-      };
-
+      // Theme is now handled globally by /static/js/theme.js
       const $ = (sel)=>document.querySelector(sel);
       const listEl = $('#list');
       const statusEl = $('#status');
@@ -76,6 +72,43 @@
             row.querySelector('.text').classList.toggle('completed', t.completed);
             saveLocal();
             syncUpdate(t).catch(()=>{});
+          });
+          // Click-to-edit the text content
+          const textEl = row.querySelector('.text');
+          textEl.addEventListener('click', (e)=>{
+            if(textEl.querySelector('input.edit-inline')) return; // already editing
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'edit-inline';
+            input.value = t.text || '';
+            input.setAttribute('aria-label','编辑待办');
+            // prevent drag while editing
+            row.draggable = false;
+            const wasCompleted = textEl.classList.contains('completed');
+            if(wasCompleted) textEl.classList.remove('completed');
+            const finish = (commit)=>{
+              const newVal = (input.value||'').trim();
+              if(commit && newVal && newVal !== t.text){
+                t.text = newVal;
+                t.updated_at = new Date().toISOString();
+                saveLocal();
+                syncUpdate(t).catch(()=>{});
+              }
+              textEl.textContent = t.text || '';
+              textEl.classList.toggle('completed', t.completed);
+              row.draggable = true;
+            };
+            textEl.textContent = '';
+            textEl.appendChild(input);
+            input.focus();
+            input.select();
+            input.addEventListener('keydown', (ev)=>{
+              if(ev.key==='Enter') { ev.preventDefault(); finish(true); }
+              else if(ev.key==='Escape') { ev.preventDefault(); finish(false); }
+              ev.stopPropagation();
+            });
+            input.addEventListener('blur', ()=> finish(true));
+            e.stopPropagation();
           });
           addDnDHandlers(row);
           listEl.appendChild(row);
@@ -202,6 +235,20 @@
         await syncFromServer();
       })();
   </script>
+    <style>
+      /* Inline editor for todo text */
+      .edit-inline{
+        width:100%;
+        border:1px solid var(--border);
+        border-radius:6px;
+        padding:6px 8px;
+        background:var(--panel);
+        color:var(--fg);
+        font: inherit;
+      }
+      .edit-inline:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 20%, transparent); }
+    </style>
+    <script src="/static/js/theme.js"></script>
     <footer class="site-footer">
       Copyright @<a href="https://github.com/essesoul/EasyTodo" target="_blank" rel="noopener noreferrer">essesoul</a>
     </footer>

@@ -7,10 +7,21 @@
     <link rel="icon" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/css/global.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <script>
+      // Early apply theme to avoid flash
+      (function(){
+        var t = localStorage.getItem('theme');
+        if(t==='dark'||t==='light') document.documentElement.setAttribute('data-theme', t);
+      })();
+    </script>
   </head>
   <body>
     <div class="auth-card">
-      <h2 class="auth-title">登录 / 注册</h2>
+      <div class="toolbar" style="margin-bottom:8px">
+        <h2 class="auth-title" style="margin:0">登录 / 注册</h2>
+        <div class="spacer"></div>
+        <button id="themeBtn" class="btn icon" title="切换明暗" aria-label="切换明暗"><i class="fa-solid fa-circle-half-stroke"></i></button>
+      </div>
       <p class="note">使用邮箱与至少 8 位密码</p>
       <div>
         <label class="note">邮箱</label>
@@ -74,6 +85,7 @@
         }catch(e){ msg.textContent = '注册失败：'+e.message }
       }
   </script>
+    <script src="/static/js/theme.js"></script>
     <footer class="site-footer">
       Copyright @<a href="https://github.com/essesoul/EasyTodo" target="_blank" rel="noopener noreferrer">essesoul</a>
     </footer>
