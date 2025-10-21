@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from pathlib import Path
+from typing import Set
 
 # Database directory inside the app (can be overridden by env)
 DEFAULT_DB_DIR = Path(__file__).resolve().parent / "database"
@@ -30,6 +31,17 @@ def init_db():
         );
         """
     )
+    # Add columns for temporary password flow if missing
+    try:
+        cur.execute("PRAGMA table_info(users)")
+        cols: Set[str] = {row[1] for row in cur.fetchall()}  # type: ignore[index]
+        if 'temp_password_hash' not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN temp_password_hash TEXT")
+        if 'temp_password_expires' not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN temp_password_expires TEXT")
+    except Exception:
+        # Best-effort; if PRAGMA fails, proceed without crashing
+        pass
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS todos (

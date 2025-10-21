@@ -6,7 +6,7 @@ import secrets
 import json
 import urllib.parse
 import urllib.request
-from datetime import timedelta
+from datetime import timedelta, datetime
 from functools import wraps
 
 from flask import Flask, jsonify, request, session, render_template, redirect, url_for
@@ -190,12 +190,59 @@ def create_app():
         password = data.get('password') or ''
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("SELECT id, password_hash FROM users WHERE email=?", (email,))
+        cur.execute("SELECT id, password_hash, temp_password_hash, temp_password_expires FROM users WHERE email=?", (email,))
         row = cur.fetchone()
-        conn.close()
-        if not row or not check_password_hash(row['password_hash'], password):
+        if not row:
+            conn.close()
             return jsonify(error='invalid_credentials'), 401
-        session['user_id'] = row['id']
+
+        uid = row['id']
+        pw_hash = row['password_hash']
+        tmp_hash = row['temp_password_hash']
+        tmp_exp = row['temp_password_expires']
+
+        authed_with_temp = False
+        # First try permanent password
+        if not check_password_hash(pw_hash, password):
+            # Then try temp password if present and not expired
+            if tmp_hash and tmp_exp:
+                try:
+                    exp_dt = datetime.strptime(tmp_exp, '%Y-%m-%dT%H:%M:%fZ')
+                except Exception:
+                    exp_dt = None
+                now = datetime.utcnow()
+                valid = bool(exp_dt and exp_dt >= now)
+                if valid and check_password_hash(tmp_hash, password):
+                    authed_with_temp = True
+                else:
+                    # If expired, clear temp creds for hygiene
+                    if exp_dt and exp_dt < now:
+                        try:
+                            cur.execute("UPDATE users SET temp_password_hash=NULL, temp_password_expires=NULL WHERE id=?", (uid,))
+                            conn.commit()
+                        except Exception:
+                            pass
+                    conn.close()
+                    return jsonify(error='invalid_credentials'), 401
+            else:
+                conn.close()
+                return jsonify(error='invalid_credentials'), 401
+
+        # If logged in using temp password, promote it to permanent now
+        if authed_with_temp:
+            try:
+                cur.execute(
+                    "UPDATE users SET password_hash=temp_password_hash, temp_password_hash=NULL, temp_password_expires=NULL WHERE id=?",
+                    (uid,),
+                )
+                conn.commit()
+            except Exception:
+                # If promotion fails, still avoid logging in with invalid state
+                conn.close()
+                return jsonify(error='server_error'), 500
+
+        conn.close()
+        session['user_id'] = uid
         if not session.get('csrf_token'):
             session['csrf_token'] = secrets.token_hex(16)
         session.permanent = True
@@ -555,21 +602,32 @@ def create_app():
             conn.close()
             return jsonify(error='not_found'), 404
         user_id = row['id']
-        # Generate new password
+        # Generate temporary password
         alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#%_'
         new_pw = ''.join(alphabet[secrets.randbelow(len(alphabet))] for _ in range(12))
-        # Send email first
+        # Send email first (mention 1-day validity)
         ok, err = _send_email_with_settings(
             to_addr=email,
             subject='EasyTodo 密码重置',
-            content=f'你的新密码为：{new_pw}\n\n请使用该密码登录，并尽快在设置页修改密码。',
+            content=(
+                f'你的临时密码为：{new_pw}\n\n'
+                f'有效期：1 天（自本邮件发送时起计算）。\n'
+                f'提示：原密码仍然可用，不会影响当前登录状态。只有当你使用临时密码成功登录后，系统才会用该临时密码覆盖原密码。\n\n'
+                f'建议你登录后尽快在“设置”页修改为自己的新密码。'
+            ),
         )
         if not ok:
             return jsonify(error=err or 'smtp_send_failed'), 500
-        # Update password in DB
-        cur.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(new_pw), user_id))
-        conn.commit()
-        conn.close()
+        # Store temp password hash and expiry (1 day)
+        try:
+            expires = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%fZ')
+            cur.execute(
+                "UPDATE users SET temp_password_hash=?, temp_password_expires=? WHERE id=?",
+                (generate_password_hash(new_pw), expires, user_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
         # Clear challenge
         try:
             session.pop('fp', None)
