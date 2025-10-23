@@ -4,8 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title or 'EasyTodo 待办' }}</title>
+    <meta name="theme-color" content="#3b82f6" />
     <meta name="csrf-token" content="{{ csrf_token }}" />
     <link rel="icon" href="/static/favicon.svg" />
+    <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="stylesheet" href="/static/css/global.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
     <script>
@@ -46,6 +48,13 @@
       let csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
       let todos = []; // local-first state
+      let pendingOps = []; // queued ops while offline
+
+      function loadPending(){
+        try{ pendingOps = JSON.parse(localStorage.getItem('pendingOps')||'[]'); }
+        catch{ pendingOps = [] }
+      }
+      function savePending(){ localStorage.setItem('pendingOps', JSON.stringify(pendingOps)); }
 
       function loadLocal(){
         try{ todos = JSON.parse(localStorage.getItem('todos')||'[]'); }
@@ -71,7 +80,7 @@
             t.completed = cb.checked;
             row.querySelector('.text').classList.toggle('completed', t.completed);
             saveLocal();
-            syncUpdate(t).catch(()=>{});
+            syncUpdate(t, 'status').catch(()=>{});
           });
           // Click-to-edit the text content
           const textEl = row.querySelector('.text');
@@ -92,7 +101,7 @@
                 t.text = newVal;
                 t.updated_at = new Date().toISOString();
                 saveLocal();
-                syncUpdate(t).catch(()=>{});
+                syncUpdate(t, 'text').catch(()=>{});
               }
               textEl.textContent = t.text || '';
               textEl.classList.toggle('completed', t.completed);
@@ -152,6 +161,8 @@
         syncReorder(ids).catch(()=>{});
       }
 
+      function isOnline(){ return navigator.onLine; }
+
       async function api(path, opts={}){
         const init = {
           credentials: 'include',
@@ -162,8 +173,24 @@
           init.headers['X-CSRF-Token'] = csrf || '';
         }
         const r = await fetch(path, init);
-        if(!r.ok){ throw new Error((await r.json().catch(()=>({}))).error||('HTTP '+r.status)) }
+        if(!r.ok){
+          let msg = 'HTTP '+r.status;
+          try{ const body = await r.json(); if(body && body.error) msg = body.error; }catch{}
+          const err = new Error(msg);
+          err.status = r.status;
+          throw err;
+        }
         return r.json();
+      }
+
+      let unauthenticated = false;
+
+      function setUnauthenticatedOfflineUI(){
+        unauthenticated = true;
+        // Hide settings/logout/sync
+        const toHide = ['settingsBtn','logoutBtn','syncBtn'];
+        toHide.forEach(id=>{ const el = document.getElementById(id); if(el) el.style.display='none'; });
+        statusEl.textContent = '离线模式（未登录）';
       }
 
       async function syncFromServer(){
@@ -173,29 +200,89 @@
           todos = remote;
           saveLocal();
           render();
-        }catch(e){ /* unauthorized? redirect */ }
+          try{ localStorage.removeItem('loggedOut'); }catch{}
+          return true;
+        }catch(e){
+          // If unauthorized, handle based on connectivity
+          if(e && e.status === 401){
+            if(isOnline()){
+              location.href = '/login';
+            }else{
+              setUnauthenticatedOfflineUI();
+            }
+          }
+          return false;
+        }
       }
+      function queueOp(op){ pendingOps.push(op); savePending(); }
+
       async function syncCreate(text){
         try{
           const j = await api('/api/todos', { method:'POST', body: JSON.stringify({ text }) });
           const idx = todos.findIndex(x=>!x.id && x.text===text);
           if(idx>=0) todos[idx] = j.todo; else todos.push(j.todo);
           saveLocal(); render();
-        }catch(e){ /* ignore */ }
+        }catch(e){
+          // Queue for later if offline/network error
+          queueOp({ type:'create', text });
+        }
       }
-      async function syncUpdate(t){
+      async function syncUpdate(t, kind){
         if(!t.id) return;
         try{
           await api(`/api/todos/${t.id}`, { method:'PUT', body: JSON.stringify({ completed: !!t.completed, text: t.text, position: t.position }) });
-        }catch(e){ /* ignore */ }
+        }catch(e){
+          // Record intended change for conflict resolution
+          queueOp({ type:'update', id: t.id, completed: !!t.completed, text: t.text, position: t.position, updated_at: t.updated_at||new Date().toISOString(), kind: kind||'update' });
+        }
       }
       async function syncReorder(ids){
         try{ await api('/api/todos/reorder', { method:'POST', body: JSON.stringify({ order: ids }) }); }
-        catch(e){ /* ignore */ }
+        catch(e){ queueOp({ type:'reorder', order: ids.slice() }); }
       }
       async function bulkUpsert(){
         try{ await api('/api/todos/bulk_upsert', { method:'POST', body: JSON.stringify({ todos }) }); }
-        catch(e){ /* ignore */ }
+        catch(e){ /* ignore for now */ }
+      }
+
+      async function flushPending(){
+        if(!pendingOps.length) return true;
+        if(!isOnline()) return false; // wait until online
+        const ops = pendingOps.slice();
+        pendingOps = []; savePending();
+        for(const op of ops){
+          try{
+            if(op.type==='create'){
+              await api('/api/todos', { method:'POST', body: JSON.stringify({ text: op.text }) });
+            }else if(op.type==='update'){
+              // Try update; if not found and only text changed, treat as new per rule
+              try{
+                await api(`/api/todos/${op.id}`, { method:'PUT', body: JSON.stringify({ completed: !!op.completed, text: op.text, position: op.position }) });
+              }catch(err){
+                const msg = String(err||'');
+                const cloudMissing = msg.includes('not_found') || msg.includes('404');
+                if(cloudMissing){
+                  // If local modified text, store as new; if only status changed, discard change
+                  if((op.kind||'update') === 'text'){
+                    await api('/api/todos', { method:'POST', body: JSON.stringify({ text: op.text }) });
+                  } // else drop per priority rule
+                } else {
+                  throw err;
+                }
+              }
+            }else if(op.type==='reorder'){
+              await api('/api/todos/reorder', { method:'POST', body: JSON.stringify({ order: op.order }) });
+            }else if(op.type==='delete_completed'){
+              await api('/api/todos/completed', { method:'DELETE' });
+            }
+          }catch(e){
+            // On any failure, put back remaining ops and stop to retry later
+            pendingOps = ops.slice(ops.indexOf(op));
+            savePending();
+            return false;
+          }
+        }
+        return true;
       }
 
       function addTodoFromInput(){
@@ -211,28 +298,140 @@
 
       document.getElementById('addBtn').onclick = addTodoFromInput;
       document.getElementById('newTodo').addEventListener('keydown', (e)=>{ if(e.key==='Enter') addTodoFromInput(); });
-      document.getElementById('delDoneBtn').onclick = async ()=>{
+      // Confirm modal for clearing completed
+      const clearModal = document.createElement('div');
+      clearModal.id = 'clearConfirmModal';
+      clearModal.className = 'modal-backdrop';
+      clearModal.setAttribute('role','dialog');
+      clearModal.setAttribute('aria-modal','true');
+      clearModal.setAttribute('aria-hidden','true');
+      clearModal.innerHTML = `
+        <div class="modal">
+          <h4 class="modal-title">确认清除已完成？</h4>
+          <div class="modal-actions">
+            <button id="clearCancel" class="btn">取消</button>
+            <button id="clearConfirm" class="btn danger">清除</button>
+          </div>
+        </div>`;
+      document.body.appendChild(clearModal);
+
+      function openClearModal(){ clearModal.style.display='flex'; clearModal.setAttribute('aria-hidden','false'); }
+      function closeClearModal(){ clearModal.style.display='none'; clearModal.setAttribute('aria-hidden','true'); }
+
+      document.getElementById('delDoneBtn').onclick = ()=>{ openClearModal(); };
+      clearModal.addEventListener('click', (e)=>{ if(e.target===clearModal) closeClearModal(); });
+      document.getElementById('clearCancel').onclick = ()=> closeClearModal();
+      document.getElementById('clearConfirm').onclick = async ()=>{
+        // Apply local change immediately
         todos = todos.filter(t=>!t.completed);
         todos.forEach((t,i)=>t.position=i);
         saveLocal(); render();
-        try{ await api('/api/todos/completed', { method:'DELETE' }); }catch{}
+        closeClearModal();
+        try{ await api('/api/todos/completed', { method:'DELETE' }); }
+        catch(e){ queueOp({ type:'delete_completed' }); }
       };
+
+      let lastOnlineKnown = navigator.onLine;
+      // Listen to SW messages to track cache refresh time
+      if (navigator.serviceWorker) {
+        navigator.serviceWorker.addEventListener('message', (e)=>{
+          const data = e.data || {};
+          if(data && data.type === 'PAGE_CACHE_REFRESHED'){
+            try{ localStorage.setItem('pageCacheUpdatedAt', String(data.at || Date.now())); }catch{}
+          }
+        });
+      }
+
       document.getElementById('syncBtn').onclick = async ()=>{
+        const nowOnline = isOnline();
+        if(!nowOnline){
+          statusEl.textContent = '已离线，请联网后重试';
+          setTimeout(()=> statusEl.textContent='', 1800);
+          return;
+        }
+        // Determine if we just transitioned from offline -> online, or cache TTL expired
+        const wasOffline = !lastOnlineKnown && nowOnline;
+        lastOnlineKnown = nowOnline;
+        let shouldRefreshCache = wasOffline;
+        try{
+          const ttlMs = 24*60*60*1000; // 24 hours
+          const last = parseInt(localStorage.getItem('pageCacheUpdatedAt')||'0', 10) || 0;
+          if(!last || (Date.now()-last) > ttlMs){ shouldRefreshCache = true; }
+        }catch{}
+        if(shouldRefreshCache && navigator.serviceWorker && navigator.serviceWorker.controller){
+          try{ navigator.serviceWorker.controller.postMessage({ type:'REFRESH_PAGE_CACHE' }); }catch{}
+        }
         statusEl.textContent = '同步中…';
-        await syncFromServer();
-        statusEl.textContent = '已从服务器获取最新数据';
+        // First flush pending local changes, then pull from server
+        const flushed = await flushPending();
+        const ok = await syncFromServer();
+        statusEl.textContent = (flushed && ok) ? '已同步' : '同步失败（网络异常或未登录）';
         setTimeout(()=> statusEl.textContent='', 1200);
       };
       document.getElementById('settingsBtn').onclick = ()=>{ location.href = '/settings' };
       document.getElementById('logoutBtn').onclick = async ()=>{
-        await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
+        try{ await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); }catch{}
+        // Clear all local storage (app data and prefs) on logout
+        // Keep an explicit flag so that offline logout is respected when back online
+        try{ localStorage.clear(); localStorage.setItem('loggedOut','1'); }catch{}
+        // Ask SW to purge caches but keep offline page available
+        if(navigator.serviceWorker && navigator.serviceWorker.controller){
+          try{ navigator.serviceWorker.controller.postMessage({ type:'LOGOUT_CLEAR_CACHES_KEEP_OFFLINE' }); }catch{}
+          // Also clear page cache for older SW versions
+          try{ navigator.serviceWorker.controller.postMessage({ type:'CLEAR_PAGE_CACHE' }); }catch{}
+        }
         location.href = '/login';
       };
 
       (async function init(){
         loadLocal();
+        loadPending();
         render();
-        await syncFromServer();
+        // If we have an explicit loggedOut flag, handle both online/offline consistently
+        try{
+          const flaggedLogout = localStorage.getItem('loggedOut') === '1';
+          if(flaggedLogout){
+            if(isOnline()){
+              try{ await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); }catch{}
+              location.href = '/login';
+              return;
+            }else{
+              setUnauthenticatedOfflineUI();
+            }
+          }
+        }catch{}
+
+        // If online, try to flush and then fetch
+        if(isOnline()){
+          await flushPending();
+          await syncFromServer();
+        }
+        // If offline and we have an explicit loggedOut flag, show unauth offline UI
+        try{
+          if(!isOnline() && localStorage.getItem('loggedOut') === '1'){
+            setUnauthenticatedOfflineUI();
+          }
+        }catch{}
+        // Listen network changes to hint user
+        window.addEventListener('online', async ()=>{
+          try{
+            if(localStorage.getItem('loggedOut') === '1'){
+              // Ensure server session is invalidated when back online, then go to login
+              try{ await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); }catch{}
+              location.href = '/login';
+              return;
+            }
+          }catch{}
+          statusEl.textContent = '网络已连接，正在同步…';
+          const flushed = await flushPending();
+          const ok = await syncFromServer();
+          statusEl.textContent = (flushed && ok) ? '已同步' : '同步失败（网络异常或未登录）';
+          setTimeout(()=> statusEl.textContent='', 1200);
+        });
+        window.addEventListener('offline', ()=>{
+          statusEl.textContent = unauthenticated ? '离线模式（未登录）' : '已离线';
+          setTimeout(()=> statusEl.textContent='', 1200);
+        });
       })();
   </script>
     <style>
@@ -249,8 +448,9 @@
       .edit-inline:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 20%, transparent); }
     </style>
     <script src="/static/js/theme.js"></script>
+    <script src="/static/js/pwa.js"></script>
     <footer class="site-footer">
-      Copyright @<a href="https://github.com/essesoul/EasyTodo" target="_blank" rel="noopener noreferrer">essesoul</a>
+      Powered by <a href="https://github.com/essesoul/EasyTodo" target="_blank" rel="noopener noreferrer">EasyTodo</a> · Copyright <a href="https://github.com/essesoul" target="_blank" rel="noopener noreferrer">Essesoul</a>
     </footer>
   </body>
   </html>

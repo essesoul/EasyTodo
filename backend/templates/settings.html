@@ -4,8 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title or '设置 - EasyTodo' }}</title>
+    <meta name="theme-color" content="#3b82f6" />
     <meta name="csrf-token" content="{{ csrf_token }}" />
     <link rel="icon" href="/static/favicon.svg" />
+    <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="stylesheet" href="/static/css/global.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
     <script>
@@ -260,7 +262,15 @@
 
       document.getElementById('backBtn').onclick = ()=>{ location.href='/' };
       document.getElementById('logoutBtn').onclick = async ()=>{
-        await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
+        try{ await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); }catch{}
+        // Clear all local storage on logout
+        try{ localStorage.clear(); }catch{}
+        // Ask SW to purge caches but keep offline page available
+        if(navigator.serviceWorker && navigator.serviceWorker.controller){
+          try{ navigator.serviceWorker.controller.postMessage({ type:'LOGOUT_CLEAR_CACHES_KEEP_OFFLINE' }); }catch{}
+          // Also clear page cache for older SW versions
+          try{ navigator.serviceWorker.controller.postMessage({ type:'CLEAR_PAGE_CACHE' }); }catch{}
+        }
         location.href='/login';
       };
 
@@ -757,8 +767,9 @@
       {% endif %}
   </script>
     <script src="/static/js/theme.js"></script>
+    <script src="/static/js/pwa.js"></script>
     <footer class="site-footer">
-      Copyright @<a href="https://github.com/essesoul/EasyTodo" target="_blank" rel="noopener noreferrer">essesoul</a>
+      Powered by <a href="https://github.com/essesoul/EasyTodo" target="_blank" rel="noopener noreferrer">EasyTodo</a> · Copyright <a href="https://github.com/essesoul" target="_blank" rel="noopener noreferrer">Essesoul</a>
     </footer>
   </body>
   </html>
