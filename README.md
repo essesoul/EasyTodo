@@ -54,14 +54,16 @@
 
 ## 环境变量
 
-- `SECRET_KEY`: 必填，生产环境请使用足够随机的值。若未显式设置 `JWT_SECRET`，也用于签名 JWT。
-- `SESSION_COOKIE_SECURE`: 在 HTTPS 环境下设为 `true`（默认 `false`）。仅用于 Flask 会话（用于 CSRF 与找回密码挑战）。
-- `JWT_SECRET`: 可选，JWT 签名密钥，未设置时回退到 `SECRET_KEY`。
-- `JWT_TTL_SECONDS`: 可选，访问令牌有效期，默认 604800（7 天）。
-- `AUTH_COOKIE_NAME`: 可选，认证 Cookie 名称，默认 `access_token`。
-- `AUTH_COOKIE_SECURE`: 可选，设置为 `true` 以在 HTTPS 下仅通过安全通道发送认证 Cookie（推荐在生产开启）。
-- `AUTH_COOKIE_SAMESITE`: 可选，默认 `Strict`，减少 CSRF 风险。
-- `AUTH_COOKIE_DOMAIN`: 可选，设置认证 Cookie 的作用域域名。
+| 变量 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `SECRET_KEY` | 是 | - | 生产环境请使用足够随机的值；未显式设置 `JWT_SECRET` 时也用于签名 JWT |
+| `SESSION_COOKIE_SECURE` | 否 | `false` | 在 HTTPS 环境下设为 `true`；仅用于 Flask 会话（用于 CSRF 与找回密码挑战） |
+| `JWT_SECRET` | 否 | - | JWT 签名密钥；未设置时回退到 `SECRET_KEY` |
+| `JWT_TTL_SECONDS` | 否 | `604800`（7 天） | 访问令牌有效期 |
+| `AUTH_COOKIE_NAME` | 否 | `access_token` | 认证 Cookie 名称 |
+| `AUTH_COOKIE_SECURE` | 否 | - | 设置为 `true` 以在 HTTPS 下仅通过安全通道发送认证 Cookie（生产环境推荐开启） |
+| `AUTH_COOKIE_SAMESITE` | 否 | `Strict` | 减少 CSRF 风险 |
+| `AUTH_COOKIE_DOMAIN` | 否 | - | 认证 Cookie 的作用域域名 |
 
 ## 认证方式（JWT）
 
