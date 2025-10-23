@@ -60,7 +60,8 @@ def create_app():
     # Auth cookie flags
     app.config['AUTH_COOKIE_NAME'] = os.environ.get('AUTH_COOKIE_NAME', 'access_token')
     app.config['AUTH_COOKIE_SECURE'] = os.environ.get('AUTH_COOKIE_SECURE', 'false').lower() == 'true' or app.config['SESSION_COOKIE_SECURE']
-    app.config['AUTH_COOKIE_SAMESITE'] = os.environ.get('AUTH_COOKIE_SAMESITE', 'Strict')
+    # Default to Lax for broader compatibility (iOS PWA standalone quirks)
+    app.config['AUTH_COOKIE_SAMESITE'] = os.environ.get('AUTH_COOKIE_SAMESITE', 'Lax')
     app.config['AUTH_COOKIE_DOMAIN'] = os.environ.get('AUTH_COOKIE_DOMAIN')  # optional
 
     init_db()
@@ -177,6 +178,8 @@ def create_app():
             secure=bool(app.config['AUTH_COOKIE_SECURE']),
             samesite=app.config['AUTH_COOKIE_SAMESITE'],
             max_age=int(app.config['JWT_TTL_SECONDS']),
+            # Also set expires to improve persistence on some mobile PWAs
+            expires=datetime.now(timezone.utc) + timedelta(seconds=int(app.config['JWT_TTL_SECONDS'])),
             path='/',
             domain=app.config['AUTH_COOKIE_DOMAIN'] or None,
         )
@@ -372,10 +375,10 @@ def create_app():
             # Then try temp password if present and not expired
             if tmp_hash and tmp_exp:
                 try:
-                    exp_dt = datetime.strptime(tmp_exp, '%Y-%m-%dT%H:%M:%fZ')
+                    exp_dt = datetime.strptime(tmp_exp, '%Y-%m-%dT%H:%M:%fZ').replace(tzinfo=timezone.utc)
                 except Exception:
                     exp_dt = None
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 valid = bool(exp_dt and exp_dt >= now)
                 if valid and check_password_hash(tmp_hash, password):
                     authed_with_temp = True
@@ -789,7 +792,7 @@ def create_app():
             return jsonify(error=err or 'smtp_send_failed'), 500
         # Store temp password hash and expiry (1 day)
         try:
-            expires = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%fZ')
+            expires = (datetime.now(timezone.utc) + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%fZ')
             cur.execute(
                 "UPDATE users SET temp_password_hash=?, temp_password_expires=? WHERE id=?",
                 (generate_password_hash(new_pw), expires, user_id),
