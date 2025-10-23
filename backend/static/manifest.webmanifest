@@ -1,0 +1,19 @@
+{
+  "name": "EasyTodo",
+  "short_name": "EasyTodo",
+  "description": "轻量、简洁的待办事项应用",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0b0c",
+  "theme_color": "#3b82f6",
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

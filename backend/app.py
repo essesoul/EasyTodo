@@ -4,12 +4,15 @@ import smtplib
 import ssl
 import secrets
 import json
+import hmac
+import hashlib
+import base64
 import urllib.parse
 import urllib.request
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from functools import wraps
 
-from flask import Flask, jsonify, request, session, render_template, redirect, url_for
+from flask import Flask, jsonify, request, session, render_template, redirect, url_for, send_from_directory, make_response
 from email.message import EmailMessage
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -18,16 +21,84 @@ from db import get_conn, init_db
 
 def create_app():
     app = Flask(__name__, static_folder='static', template_folder='templates')
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+    # Persist a dev secret key so local sessions survive restarts.
+    # If production sets SECRET_KEY, we use it and never touch the dev key file.
+    secret_from_env = os.environ.get('SECRET_KEY')
+    if secret_from_env:
+        app.config['SECRET_KEY'] = secret_from_env
+    else:
+        dev_key_path = os.path.join(os.path.dirname(__file__), '.dev-secret-key')
+        try:
+            if os.path.exists(dev_key_path):
+                with open(dev_key_path, 'r', encoding='utf-8') as f:
+                    app.config['SECRET_KEY'] = f.read().strip()
+            else:
+                # Allow disabling file creation explicitly if someone really runs without env on prod
+                if os.environ.get('EASYTODO_DISABLE_DEV_KEY') == '1':
+                    app.config['SECRET_KEY'] = secrets.token_hex(32)
+                else:
+                    key = secrets.token_hex(32)
+                    with open(dev_key_path, 'w', encoding='utf-8') as f:
+                        f.write(key)
+                    app.config['SECRET_KEY'] = key
+        except Exception:
+            # Fallback if file not writable for any reason
+            app.config['SECRET_KEY'] = secrets.token_hex(32)
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     # Set in deployment behind HTTPS
     app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
 
+    # JWT settings
+    app.config['JWT_SECRET'] = os.environ.get('JWT_SECRET') or app.config['SECRET_KEY']
+    # TTL in seconds; default 7 days
+    try:
+        app.config['JWT_TTL_SECONDS'] = int(os.environ.get('JWT_TTL_SECONDS', str(7*24*60*60)))
+    except Exception:
+        app.config['JWT_TTL_SECONDS'] = 7*24*60*60
+    # Auth cookie flags
+    app.config['AUTH_COOKIE_NAME'] = os.environ.get('AUTH_COOKIE_NAME', 'access_token')
+    app.config['AUTH_COOKIE_SECURE'] = os.environ.get('AUTH_COOKIE_SECURE', 'false').lower() == 'true' or app.config['SESSION_COOKIE_SECURE']
+    app.config['AUTH_COOKIE_SAMESITE'] = os.environ.get('AUTH_COOKIE_SAMESITE', 'Strict')
+    app.config['AUTH_COOKIE_DOMAIN'] = os.environ.get('AUTH_COOKIE_DOMAIN')  # optional
+
     init_db()
 
     # Same-origin app, no CORS needed
+
+    @app.after_request
+    def set_security_headers(resp):
+        # Basic hardening; allow required third-party origins used in app
+        csp_parts = [
+            "default-src 'self'",
+            "img-src 'self' data:",
+            "font-src 'self' https://cdnjs.cloudflare.com data:",
+            "style-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'",
+            "script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com 'unsafe-inline'",
+            "connect-src 'self'",
+            "frame-src 'self' https://challenges.cloudflare.com",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "frame-ancestors 'none'",
+        ]
+        resp.headers.setdefault('Content-Security-Policy', '; '.join(csp_parts))
+        resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        resp.headers.setdefault('X-Frame-Options', 'DENY')
+        resp.headers.setdefault('Referrer-Policy', 'no-referrer')
+        # Cache policy: avoid caching dynamic pages and all API responses
+        try:
+            is_api = request.path.startswith('/api/')
+        except Exception:
+            is_api = False
+        # Treat HTML pages as dynamic; allow static assets to be cached by SW/edge
+        is_html = (resp.mimetype or '').startswith('text/html')
+        is_static = request.path.startswith('/static/') if hasattr(request, 'path') else False
+        if is_api or (is_html and not is_static):
+            resp.headers['Cache-Control'] = 'no-store'
+            resp.headers['Pragma'] = 'no-cache'
+        return resp
+        return resp
 
     @app.route('/api/health')
     def health():
@@ -47,8 +118,87 @@ def create_app():
         return jsonify(token=token)
 
     # --- Helpers ---
+    def _b64url_encode(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+    def _b64url_decode(data: str) -> bytes:
+        pad = '=' * (-len(data) % 4)
+        return base64.urlsafe_b64decode((data + pad).encode('ascii'))
+
+    def _jwt_sign(payload: dict) -> str:
+        header = {'alg': 'HS256', 'typ': 'JWT'}
+        header_b64 = _b64url_encode(json.dumps(header, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))
+        payload_b64 = _b64url_encode(json.dumps(payload, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))
+        signing_input = f"{header_b64}.{payload_b64}".encode('ascii')
+        secret = app.config['JWT_SECRET'].encode('utf-8')
+        sig = hmac.new(secret, signing_input, hashlib.sha256).digest()
+        sig_b64 = _b64url_encode(sig)
+        return f"{header_b64}.{payload_b64}.{sig_b64}"
+
+    def _jwt_verify(token: str):
+        try:
+            parts = token.split('.')
+            if len(parts) != 3:
+                return None
+            header_b64, payload_b64, sig_b64 = parts
+            signing_input = f"{header_b64}.{payload_b64}".encode('ascii')
+            secret = app.config['JWT_SECRET'].encode('utf-8')
+            expected = hmac.new(secret, signing_input, hashlib.sha256).digest()
+            given = _b64url_decode(sig_b64)
+            if not hmac.compare_digest(expected, given):
+                return None
+            payload = json.loads(_b64url_decode(payload_b64).decode('utf-8'))
+            # exp check (unix seconds)
+            exp = int(payload.get('exp') or 0)
+            now = int(datetime.now(timezone.utc).timestamp())
+            if exp and now > exp:
+                return None
+            return payload
+        except Exception:
+            return None
+
+    def _make_access_token(user_id: int) -> str:
+        now = int(datetime.now(timezone.utc).timestamp())
+        payload = {
+            'sub': int(user_id),
+            'iat': now,
+            'exp': now + int(app.config['JWT_TTL_SECONDS']),
+        }
+        return _jwt_sign(payload)
+
+    def _set_auth_cookie(resp, token: str):
+        resp.set_cookie(
+            app.config['AUTH_COOKIE_NAME'],
+            token,
+            httponly=True,
+            secure=bool(app.config['AUTH_COOKIE_SECURE']),
+            samesite=app.config['AUTH_COOKIE_SAMESITE'],
+            max_age=int(app.config['JWT_TTL_SECONDS']),
+            path='/',
+            domain=app.config['AUTH_COOKIE_DOMAIN'] or None,
+        )
+
+    def _clear_auth_cookie(resp):
+        resp.delete_cookie(
+            app.config['AUTH_COOKIE_NAME'],
+            path='/',
+            domain=app.config['AUTH_COOKIE_DOMAIN'] or None,
+        )
+
     def current_user_id():
-        return session.get('user_id')
+        # 1) Authorization: Bearer (optional), 2) Cookie
+        auth = request.headers.get('Authorization') or ''
+        if auth.startswith('Bearer '):
+            payload = _jwt_verify(auth[7:].strip())
+            if payload and 'sub' in payload:
+                return int(payload['sub'])
+        tok = request.cookies.get(app.config['AUTH_COOKIE_NAME'])
+        if not tok:
+            return None
+        payload = _jwt_verify(tok)
+        if not payload or 'sub' not in payload:
+            return None
+        return int(payload['sub'])
 
     def is_admin_user(user_id=None) -> bool:
         uid = user_id if user_id is not None else current_user_id()
@@ -74,6 +224,7 @@ def create_app():
 
     def require_csrf():
         token = request.headers.get('X-CSRF-Token')
+        # We continue using server-signed Flask session to hold CSRF token
         if not token or token != session.get('csrf_token'):
             return False
         return True
@@ -142,6 +293,15 @@ def create_app():
         email = row['email'] if row else ''
         return render_template('settings.html', title='设置 - EasyTodo', csrf_token=token, email=email, is_admin=is_admin_user(uid))
 
+    # --- PWA assets ---
+    # Serve service worker at root scope so it can control all pages
+    @app.get('/sw.js')
+    def service_worker():
+        resp = make_response(send_from_directory(app.static_folder, 'sw.js', mimetype='application/javascript'))
+        # Allow the SW to control root scope
+        resp.headers['Service-Worker-Allowed'] = '/'
+        return resp
+
     # --- Auth ---
     @app.post('/api/auth/register')
     def register():
@@ -173,15 +333,17 @@ def create_app():
             conn.rollback()
             conn.close()
             return jsonify(error='email_taken'), 409
-        # auto-login
+        # auto-login via JWT
         cur.execute("SELECT id FROM users WHERE email=?", (email,))
         user_id = cur.fetchone()['id']
-        session['user_id'] = user_id
         if not session.get('csrf_token'):
             session['csrf_token'] = secrets.token_hex(16)
         session.permanent = True
         conn.close()
-        return jsonify(ok=True)
+        token = _make_access_token(int(user_id))
+        resp = jsonify(ok=True)
+        _set_auth_cookie(resp, token)
+        return resp
 
     @app.post('/api/auth/login')
     def login():
@@ -242,16 +404,20 @@ def create_app():
                 return jsonify(error='server_error'), 500
 
         conn.close()
-        session['user_id'] = uid
         if not session.get('csrf_token'):
             session['csrf_token'] = secrets.token_hex(16)
         session.permanent = True
-        return jsonify(ok=True)
+        token = _make_access_token(int(uid))
+        resp = jsonify(ok=True)
+        _set_auth_cookie(resp, token)
+        return resp
 
     @app.post('/api/auth/logout')
     def logout():
         session.clear()
-        return jsonify(ok=True)
+        resp = jsonify(ok=True)
+        _clear_auth_cookie(resp)
+        return resp
 
     @app.post('/api/auth/change_password')
     @login_required

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>离线 - EasyTodo</title>
+    <link rel="icon" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/css/global.css" />
+    <style>
+      .offline-wrap{ max-width:600px; margin:18vh auto 0; padding:20px; border:1px solid var(--border); border-radius:12px; background:var(--panel); text-align:center }
+      .offline-wrap h1{ margin:0 0 8px 0; font-size:1.4rem }
+      .offline-wrap p{ margin:0; color:var(--muted) }
+      .offline-actions{ margin-top:14px; display:flex; gap:8px; justify-content:center }
+      /* Ensure both buttons have identical typography */
+      .offline-actions .btn{ font-size:14px; font-weight:600; }
+    </style>
+  </head>
+  <body>
+    <div class="offline-wrap">
+      <h1>你已离线</h1>
+      <p id="offlineMessage">网络不可用。</p>
+      <div class="offline-actions">
+        <a id="homeBtn" class="btn primary" href="/">回到首页</a>
+        <button class="btn" onclick="location.reload()">重试</button>
+      </div>
+    </div>
+    <script>
+      (function(){
+        const PAGES_CACHE = 'easytodo-pages-v1';
+        const msgEl = document.getElementById('offlineMessage');
+        const homeBtn = document.getElementById('homeBtn');
+
+        function hasLocalTodos(){
+          try{
+            const raw = localStorage.getItem('todos');
+            if(!raw) return false;
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) && arr.length > 0;
+          }catch(_){ return false; }
+        }
+
+        async function hasCachedHome(){
+          if(!('caches' in window)) return false;
+          try{
+            const cache = await caches.open(PAGES_CACHE);
+            const hit = await cache.match('/');
+            return !!hit;
+          }catch(_){ return false; }
+        }
+
+        (async function init(){
+          const localHasTodos = hasLocalTodos();
+          const cachedHome = await hasCachedHome();
+
+          // Message according to local cached content
+          if(localHasTodos){
+            msgEl.textContent = '网络不可用。可继续离线查看本地待办。';
+          } else {
+            msgEl.textContent = '网络不可用';
+          }
+
+          // Only show back-to-home when the app shell is cached
+          if(!cachedHome){
+            homeBtn.style.display = 'none';
+          }
+        })();
+      })();
+    </script>
+  </body>
+  </html>

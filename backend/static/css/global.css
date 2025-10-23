@@ -77,11 +77,13 @@ body{
   border:1px solid var(--border);
   background:var(--panel);
   color:var(--fg);
+  text-decoration:none;
   cursor:pointer;
   display:inline-flex; align-items:center; justify-content:center;
   white-space: nowrap;
   -webkit-appearance: none; appearance: none;
 }
+.btn:hover{ text-decoration: none; }
 .btn:hover{background:var(--panel-2)}
 .btn:active{transform:translateY(1px)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-contrast)}
