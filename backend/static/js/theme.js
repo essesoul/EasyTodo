@@ -5,6 +5,24 @@
 // - system: <i class="fa-solid fa-circle-half-stroke"></i>
 (function(){
   const STORAGE_KEY = 'theme';
+  const MQL = (function(){
+    try{ return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); }
+    catch(_){ return null; }
+  })();
+
+  function applyThemeColor(mode){
+    try{
+      const dark = (mode === 'dark') || (mode !== 'light' && !!(MQL && MQL.matches));
+      const color = dark ? '#0b0e11' : '#f7f8fa';
+      let meta = document.querySelector('meta[name="theme-color"]');
+      if(!meta){
+        meta = document.createElement('meta');
+        meta.setAttribute('name','theme-color');
+        document.head.appendChild(meta);
+      }
+      meta.setAttribute('content', color);
+    }catch(_){/* no-op */}
+  }
 
   function getMode(){
     const v = localStorage.getItem(STORAGE_KEY);
@@ -18,6 +36,7 @@
       document.documentElement.removeAttribute('data-theme');
     }
     localStorage.setItem(STORAGE_KEY, mode);
+    applyThemeColor(mode);
   }
 
   function updateIcon(btn){
@@ -55,16 +74,16 @@
     // If following system, no attribute is set; CSS @media handles palette.
     // Optionally, react to changes to keep consistent if needed.
     try{
-      const mql = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
-      if(mql && typeof mql.addEventListener === 'function'){
-        mql.addEventListener('change', ()=>{
+      if(MQL && typeof MQL.addEventListener === 'function'){
+        MQL.addEventListener('change', ()=>{
           if(getMode()==='system'){
-            // No attribute necessary, but update icon title just in case
+            // Update icon and theme-color when system scheme changes
             updateIcon(document.getElementById('themeBtn'));
+            applyThemeColor('system');
           }
         });
       }
-    }catch{}
+    }catch(_){/* no-op */}
   }
 
   if(document.readyState === 'loading'){

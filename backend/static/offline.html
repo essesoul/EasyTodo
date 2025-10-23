@@ -6,6 +6,26 @@
     <title>离线 - EasyTodo</title>
     <link rel="icon" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/css/global.css" />
+    <meta name="theme-color" content="#f7f8fa" id="theme-color" />
+    <script>
+      // Early apply theme + address bar color for offline page
+      (function(){
+        try{
+          var t = localStorage.getItem('theme');
+          if(t==='dark'||t==='light') document.documentElement.setAttribute('data-theme', t);
+          var isDark = false;
+          if(t==='dark') isDark = true;
+          else if(t==='light') isDark = false;
+          else {
+            var mql = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+            isDark = !!(mql && mql.matches);
+          }
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if(!meta){ meta = document.createElement('meta'); meta.setAttribute('name','theme-color'); document.head.appendChild(meta); }
+          meta.setAttribute('content', isDark ? '#0b0e11' : '#f7f8fa');
+        }catch(_){ /* ignore */ }
+      })();
+    </script>
     <style>
       .offline-wrap{ max-width:600px; margin:18vh auto 0; padding:20px; border:1px solid var(--border); border-radius:12px; background:var(--panel); text-align:center }
       .offline-wrap h1{ margin:0 0 8px 0; font-size:1.4rem }
