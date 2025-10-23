@@ -72,11 +72,14 @@ def create_app():
         # Basic hardening; allow required third-party origins used in app
         csp_parts = [
             "default-src 'self'",
-            "img-src 'self' data:",
+            # Allow self + data URLs + Cloudflare Insights pixel if used
+            "img-src 'self' data: https://cloudflareinsights.com",
             "font-src 'self' https://cdnjs.cloudflare.com data:",
             "style-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'",
-            "script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com 'unsafe-inline'",
-            "connect-src 'self'",
+            # Allow Cloudflare Turnstile + Cloudflare Insights beacon
+            "script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com https://static.cloudflareinsights.com 'unsafe-inline'",
+            # Permit outgoing analytics beacons
+            "connect-src 'self' https://cloudflareinsights.com",
             "frame-src 'self' https://challenges.cloudflare.com",
             "object-src 'none'",
             "base-uri 'self'",

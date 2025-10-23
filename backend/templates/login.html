@@ -140,6 +140,7 @@
         const password = document.getElementById('password').value;
         try{
           await post('/api/auth/login', { email, password });
+          try{ localStorage.removeItem('loggedOut'); }catch{}
           location.href = '/';
         }catch(e){ msg.textContent = '登录失败：'+e.message }
       }
@@ -150,6 +151,7 @@
           const password = document.getElementById('password').value;
           try{
             await post('/api/auth/register', { email, password });
+            try{ localStorage.removeItem('loggedOut'); }catch{}
             location.href = '/';
           }catch(e){ msg.textContent = '注册失败：'+e.message }
         };
