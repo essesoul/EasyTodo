@@ -10,7 +10,7 @@
 - 拉取镜像：
   
   ```bash
-  docker pull ghcr.io/essesoul/easytodo:latest
+  docker pull ghcr.io/umink-lab/easytodo:latest
   ```
 
 - 准备本地数据库目录（用于持久化）：
@@ -27,7 +27,7 @@
     -e SECRET_KEY=$(openssl rand -hex 32) \
     -e AUTH_COOKIE_SECURE=false \
     -v $(pwd)/database:/app/database \
-    ghcr.io/essesoul/easytodo:latest
+    ghcr.io/umink-lab/easytodo:latest
   ```
 
 - 打开浏览器访问：`http://localhost:5000`
